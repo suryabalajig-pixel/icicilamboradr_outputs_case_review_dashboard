@@ -1,0 +1,387 @@
+import { useAppStore } from '../store/appStore';
+import {
+  passCount,
+  failCount,
+  failedByAmountMismatchCount,
+  failedByLowConfidenceCount,
+  failedByAgentBlockCount,
+  failedWithKnockedCount,
+  failedWithoutKnockedCount,
+  passedWithKnockedCount,
+  withKnockedCount,
+  passedWithJudgeApprovalCount,
+  passedWithJudgeFailFlagCount,
+  passedWithLowJudgeScoreCount,
+  passedWithAnyJudgeFlagCount,
+  totalJudgeFlagsInPassedCases,
+  errorCount,
+  stageInsights,
+} from '../lib/insights';
+
+// ─── InsightCard ──────────────────────────────────────────────────────────────
+
+interface InsightCardProps {
+  label: string;
+  value: string | number;
+  sub?: string;
+  flag?: string;
+  active?: boolean;         // true = card is the currently active filter
+  onClick?: () => void;
+  variant?: 'default' | 'pass' | 'fail' | 'warn' | 'muted';
+}
+
+function InsightCard({ label, value, sub, flag, active, onClick, variant = 'default' }: InsightCardProps) {
+  const valueColor: Record<string, string> = {
+    default: 'text-textPrimary',
+    pass:    'text-green-600',
+    fail:    'text-red-600',
+    warn:    'text-amber-600',
+    muted:   'text-textMuted',
+  };
+
+  return (
+    <div
+      onClick={onClick}
+      title={active ? 'Click to clear this filter' : undefined}
+      className={[
+        'flex min-w-[140px] flex-col gap-1 rounded-lg border bg-card px-3 py-2.5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md',
+        onClick ? 'cursor-pointer' : '',
+        active
+          ? 'border-accent ring-2 ring-accent/30 bg-accent/5'
+          : 'border-border',
+      ].join(' ')}
+    >
+      <div className="flex items-center justify-between gap-1">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-textMuted leading-tight">
+          {label}
+        </span>
+        {active && (
+          <span className="shrink-0 text-[9px] font-bold uppercase tracking-widest text-accent">
+            active ✕
+          </span>
+        )}
+      </div>
+      <div className="flex items-baseline gap-2">
+        <span className={`text-2xl font-bold leading-none ${valueColor[variant]}`}>{value}</span>
+        {flag && (
+          <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+            🚩 {flag}
+          </span>
+        )}
+      </div>
+      {sub && <span className="text-[11px] leading-tight text-textMuted">{sub}</span>}
+    </div>
+  );
+}
+
+// ─── GroupLabel ───────────────────────────────────────────────────────────────
+// Vertical label that sits between a divider and its group of cards.
+
+interface GroupLabelProps {
+  label: string;
+  variant?: 'default' | 'fail' | 'warn';
+}
+
+function GroupLabel({ label, variant = 'default' }: GroupLabelProps) {
+  const color: Record<string, string> = {
+    default: 'text-textMuted',
+    fail:    'text-red-500',
+    warn:    'text-amber-500',
+  };
+  return (
+    <div className={`flex items-center pr-2 text-[9px] font-bold uppercase tracking-widest ${color[variant]}`}
+      style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', minWidth: '18px' }}
+    >
+      {label}
+    </div>
+  );
+}
+
+// ─── Divider ──────────────────────────────────────────────────────────────────
+
+function Divider() {
+  return <div className="mx-2 self-stretch border-l border-border" />;
+}
+
+// ─── InsightsBar ──────────────────────────────────────────────────────────────
+
+export default function InsightsBar() {
+  const allCaseRows      = useAppStore((s) => s.allCaseRows);
+  const filteredRows     = useAppStore((s) => s.filteredRows);
+  const stageColumns     = useAppStore((s) => s.stageColumns);
+  const settings         = useAppStore((s) => s.settings);
+  const insightsScope    = useAppStore((s) => s.insightsScope);
+  const setInsightsScope = useAppStore((s) => s.setInsightsScope);
+  const filters          = useAppStore((s) => s.filters);
+  const setFilter        = useAppStore((s) => s.setFilter);
+  const clearAllFilters  = useAppStore((s) => s.clearAllFilters);
+
+  const rows      = insightsScope === 'all' ? allCaseRows : filteredRows;
+  // Always compute metrics against allCaseRows so card values don't collapse
+  // to zero when a filter is active (e.g. clicking "Passed" should show 52,
+  // not re-filter to 52 and then show 52-within-52).
+  const metricRows = allCaseRows;
+  const threshold  = settings.lowConfidenceThreshold;
+
+  // ── Verdict counts (always from allCaseRows for stable display) ─────
+  const total       = metricRows.length;
+  const passed      = passCount(metricRows);
+  const failed      = failCount(metricRows);
+  const passRatePct = total === 0 ? '—' : `${((passed / total) * 100).toFixed(0)}% pass rate`;
+
+  // ── Fail-reason breakdown ───────────────────────────────────────────
+  const failAmtMismatch = failedByAmountMismatchCount(metricRows);
+  const failLowConf     = failedByLowConfidenceCount(metricRows, threshold);
+  const failAgentBlock  = failedByAgentBlockCount(metricRows, threshold);
+
+  // ── Knocked ─────────────────────────────────────────────────────────
+  const totalWithKnocked   = withKnockedCount(metricRows);
+  const passWithKnocked    = passedWithKnockedCount(metricRows);
+  const failWithKnocked    = failedWithKnockedCount(metricRows);
+  const failWithoutKnocked = failedWithoutKnockedCount(metricRows);
+
+  // ── Judge override ──────────────────────────────────────────────────
+  const passAnyFlag   = passedWithAnyJudgeFlagCount(metricRows);
+  const totalFlags    = totalJudgeFlagsInPassedCases(metricRows);
+  const passJudgeFail = passedWithJudgeFailFlagCount(metricRows);
+  const passJudgePass = passedWithJudgeApprovalCount(metricRows);
+  const passLowScore  = passedWithLowJudgeScoreCount(metricRows, 0.75);
+
+  // ── Stage pipeline ──────────────────────────────────────────────────
+  const perStage = stageInsights(metricRows, stageColumns, threshold);
+  const stageLabel = (fileName: string): string => {
+    for (const row of allCaseRows) {
+      const stage = row.stages.find((s) => s.fileName === fileName);
+      if (stage) return stage.label;
+    }
+    return fileName.replace('.json', '');
+  };
+
+  // ── Errors ──────────────────────────────────────────────────────────
+  const errors = errorCount(metricRows);
+
+  // ── Active filter state — drives the active/toggle logic ────────────
+  const isVerdictPass     = filters.finalVerdict === 1;
+  const isVerdictFail     = filters.finalVerdict === 0;
+  const isAmtMismatch     = filters.amountMismatchOnly === true;
+  const isErrorsOnly      = filters.hasErrorsOnly === true;
+  const hasAnyFilter      = isVerdictPass || isVerdictFail || isAmtMismatch || isErrorsOnly;
+
+  // Toggle helpers — clicking an already-active filter clears all filters.
+  const toggleVerdict = (v: 0 | 1) => {
+    if (filters.finalVerdict === v) {
+      clearAllFilters();
+    } else {
+      // Reset amountMismatchOnly when switching to a verdict-only filter
+      setFilter({ finalVerdict: v, amountMismatchOnly: false, hasErrorsOnly: false });
+    }
+  };
+
+  const toggleAmtMismatch = () => {
+    if (isAmtMismatch) {
+      clearAllFilters();
+    } else {
+      setFilter({ finalVerdict: 0, amountMismatchOnly: true, hasErrorsOnly: false });
+    }
+  };
+
+  const toggleErrors = () => {
+    if (isErrorsOnly) {
+      clearAllFilters();
+    } else {
+      setFilter({ hasErrorsOnly: true, finalVerdict: 'all', amountMismatchOnly: false });
+    }
+  };
+
+  if (total === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-0 border-b border-border bg-surface">
+
+      {/* ── Toolbar: scope toggle + active filter indicator ─────────── */}
+      <div className="flex items-center gap-3 border-b border-border px-4 py-2">
+        <span className="text-[10px] font-semibold uppercase tracking-widest text-textMuted">
+          Scope
+        </span>
+        {(['filtered', 'all'] as const).map((scope) => (
+          <button
+            key={scope}
+            onClick={() => setInsightsScope(scope)}
+            className={`rounded-full px-3 py-0.5 text-caption font-medium transition-colors ${
+              insightsScope === scope
+                ? 'bg-accent text-white shadow-sm'
+                : 'bg-card text-textMuted hover:bg-rowHover'
+            }`}
+          >
+            {scope === 'all'
+              ? `All Cases (${allCaseRows.length})`
+              : `Filtered (${filteredRows.length})`}
+          </button>
+        ))}
+        {hasAnyFilter && (
+          <button
+            onClick={clearAllFilters}
+            className="ml-auto rounded-full border border-accent px-3 py-0.5 text-caption font-medium text-accent hover:bg-accent hover:text-white transition-colors"
+          >
+            Clear filter ✕
+          </button>
+        )}
+      </div>
+
+      {/* ── Single scrollable row of all cards ───────────────────────── */}
+      <div className="overflow-x-auto">
+        <div className="flex min-w-max items-stretch gap-0 px-4 py-3">
+
+          {/* ── GROUP 1: Summary ──────────────────────────────────────── */}
+          <GroupLabel label="Summary" />
+          <InsightCard label="Total Cases" value={total} variant="muted" />
+          <InsightCard
+            label="Passed"
+            value={passed}
+            sub={passRatePct}
+            variant={passed > 0 ? 'pass' : 'muted'}
+            active={isVerdictPass}
+            onClick={() => toggleVerdict(1)}
+          />
+          <InsightCard
+            label="Failed"
+            value={failed}
+            sub={total > 0 ? `${((failed / total) * 100).toFixed(0)}% of total` : undefined}
+            variant={failed > 0 ? 'fail' : 'muted'}
+            active={isVerdictFail && !isAmtMismatch}
+            onClick={() => toggleVerdict(0)}
+          />
+          {errors > 0 && (
+            <InsightCard
+              label="Parse Errors"
+              value={errors}
+              sub="missing / unreadable"
+              variant="fail"
+              active={isErrorsOnly}
+              onClick={toggleErrors}
+            />
+          )}
+
+          <Divider />
+
+          {/* ── GROUP 2: Why Failed ───────────────────────────────────── */}
+          <GroupLabel label="Why Failed" variant="fail" />
+          <InsightCard
+            label="Amount Mismatch"
+            value={failAmtMismatch}
+            sub="extracted ≠ calculated"
+            variant={failAmtMismatch > 0 ? 'warn' : 'muted'}
+            active={isAmtMismatch}
+            onClick={toggleAmtMismatch}
+          />
+          <InsightCard
+            label={`Low Conf <${(threshold * 100).toFixed(0)}%`}
+            value={failLowConf}
+            sub="amounts match, conf low"
+            variant={failLowConf > 0 ? 'fail' : 'muted'}
+            active={isVerdictFail && !isAmtMismatch && !isErrorsOnly}
+            onClick={() => toggleVerdict(0)}
+          />
+          <InsightCard
+            label="Agent Blocked"
+            value={failAgentBlock}
+            sub="doc / admin / financial"
+            variant={failAgentBlock > 0 ? 'warn' : 'muted'}
+            onClick={() => toggleVerdict(0)}
+          />
+
+          <Divider />
+
+          {/* ── GROUP 3: Knocked ──────────────────────────────────────── */}
+          <GroupLabel label="Knocked" variant="warn" />
+          <InsightCard
+            label="Total With Knocked"
+            value={totalWithKnocked}
+            sub="non-payable > 0"
+            variant={totalWithKnocked > 0 ? 'warn' : 'muted'}
+          />
+          <InsightCard
+            label="Passed With Knocked"
+            value={passWithKnocked}
+            sub="verdict=1, deductions"
+            variant={passWithKnocked > 0 ? 'pass' : 'muted'}
+            active={isVerdictPass}
+            onClick={() => toggleVerdict(1)}
+          />
+          <InsightCard
+            label="Failed With Knocked"
+            value={failWithKnocked}
+            sub="verdict=0, deductions"
+            variant={failWithKnocked > 0 ? 'fail' : 'muted'}
+            active={isVerdictFail && !isAmtMismatch}
+            onClick={() => toggleVerdict(0)}
+          />
+          <InsightCard
+            label="Failed No Knocked"
+            value={failWithoutKnocked}
+            sub="verdict=0, no deductions"
+            variant={failWithoutKnocked > 0 ? 'warn' : 'muted'}
+            onClick={() => toggleVerdict(0)}
+          />
+
+          <Divider />
+
+          {/* ── GROUP 4: Judge Override ───────────────────────────────── */}
+          <GroupLabel label="Judge Override" variant="warn" />
+          <InsightCard
+            label="Passed With Flags"
+            value={passAnyFlag}
+            sub="≥1 override flag"
+            flag={totalFlags > 0 ? `${totalFlags} flags` : undefined}
+            variant={passAnyFlag > 0 ? 'warn' : 'muted'}
+            active={isVerdictPass}
+            onClick={() => toggleVerdict(1)}
+          />
+          <InsightCard
+            label="Judge Fail Flag"
+            value={passJudgeFail}
+            sub="passed, judge=fail"
+            flag={passJudgeFail > 0 ? 'critical' : undefined}
+            variant={passJudgeFail > 0 ? 'fail' : 'muted'}
+            active={isVerdictPass}
+            onClick={() => toggleVerdict(1)}
+          />
+          <InsightCard
+            label="Judge Approved"
+            value={passJudgePass}
+            sub="judge.status=pass"
+            variant={passJudgePass > 0 ? 'pass' : 'muted'}
+            active={isVerdictPass}
+            onClick={() => toggleVerdict(1)}
+          />
+          <InsightCard
+            label="Low Judge Score"
+            value={passLowScore}
+            sub="min score < 75%"
+            variant={passLowScore > 0 ? 'warn' : 'muted'}
+            active={isVerdictPass}
+            onClick={() => toggleVerdict(1)}
+          />
+
+          {/* ── GROUP 5: Pipeline Stages ──────────────────────────────── */}
+          {perStage.length > 0 && (
+            <>
+              <Divider />
+              <GroupLabel label="Pipeline" />
+              {perStage.map((s) => (
+                <InsightCard
+                  key={s.fileName}
+                  label={stageLabel(s.fileName)}
+                  value={s.avg === null ? '—' : s.avg.toFixed(2)}
+                  sub={s.lowCount > 0 ? `${s.lowCount} low` : 'all good'}
+                  variant={s.lowCount > 0 ? 'warn' : 'muted'}
+                />
+              ))}
+            </>
+          )}
+
+        </div>
+      </div>
+    </div>
+  );
+}
