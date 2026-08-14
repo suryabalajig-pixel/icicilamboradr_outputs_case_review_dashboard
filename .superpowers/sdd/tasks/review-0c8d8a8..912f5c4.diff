@@ -1,0 +1,643 @@
+# Review package: 0c8d8a8..912f5c4
+
+## Commits
+912f5c4 Implement directory loader, persisted settings, and dir handle storage (Task 4)
+
+## Files changed
+ src/hooks/useDirectoryLoader.test.ts | 278 +++++++++++++++++++++++++++++++++++
+ src/hooks/useDirectoryLoader.ts      | 195 +++++++++++++++++++++---
+ src/hooks/usePersistedSettings.ts    |  45 ++++++
+ src/lib/dirHandleStore.ts            |  23 +++
+ src/store/appStore.ts                |  12 +-
+ 5 files changed, 525 insertions(+), 28 deletions(-)
+
+## Diff
+diff --git a/src/hooks/useDirectoryLoader.test.ts b/src/hooks/useDirectoryLoader.test.ts
+new file mode 100644
+index 0000000..9e7fba9
+--- /dev/null
++++ b/src/hooks/useDirectoryLoader.test.ts
+@@ -0,0 +1,278 @@
++import { describe, expect, it } from 'vitest';
++import { loadCaseRows } from './useDirectoryLoader';
++import { DEFAULT_SETTINGS } from '../lib/types';
++import type { SettingsConfig } from '../lib/types';
++
++// Minimal mocks for the File System Access API handles — plain JS objects
++// implementing just the methods loadCaseRows actually touches.
++
++type Entry = FileSystemFileHandle | FileSystemDirectoryHandle;
++
++function makeFileHandle(name: string, contents: string): FileSystemFileHandle {
++  return {
++    kind: 'file',
++    name,
++    async getFile() {
++      return { text: async () => contents } as unknown as File;
++    },
++  } as unknown as FileSystemFileHandle;
++}
++
++function makeDirHandle(
++  name: string,
++  entries: Entry[],
++  options: { missingNames?: string[] } = {}
++): FileSystemDirectoryHandle {
++  const byName = new Map(entries.map((e) => [e.name, e]));
++  const missing = new Set(options.missingNames ?? []);
++
++  return {
++    kind: 'directory',
++    name,
++    async *values() {
++      for (const entry of entries) {
++        yield entry;
++      }
++    },
++    async *entries() {
++      for (const entry of entries) {
++        yield [entry.name, entry] as [string, Entry];
++      }
++    },
++    async getFileHandle(fileName: string) {
++      if (missing.has(fileName)) {
++        const err = new Error('NotFoundError');
++        err.name = 'NotFoundError';
++        throw err;
++      }
++      const found = byName.get(fileName);
++      if (!found || found.kind !== 'file') {
++        const err = new Error('NotFoundError');
++        err.name = 'NotFoundError';
++        throw err;
++      }
++      return found as FileSystemFileHandle;
++    },
++    async getDirectoryHandle(dirName: string) {
++      if (missing.has(dirName)) {
++        const err = new Error('NotFoundError');
++        err.name = 'NotFoundError';
++        throw err;
++      }
++      const found = byName.get(dirName);
++      if (!found || found.kind !== 'directory') {
++        const err = new Error('NotFoundError');
++        err.name = 'NotFoundError';
++        throw err;
++      }
++      return found as FileSystemDirectoryHandle;
++    },
++  } as unknown as FileSystemDirectoryHandle;
++}
++
++function finalJson(verdict: unknown) {
++  return JSON.stringify({ bill_summary: { case_verdict: verdict } });
++}
++
++function stageJson(stage: string, score: unknown) {
++  return JSON.stringify({ stage, score });
++}
++
++describe('loadCaseRows', () => {
++  it('happy path: N valid case subfolders produce N CaseRows', async () => {
++    const case1 = makeDirHandle('case1', [
++      makeFileHandle('consolidated_final.json', finalJson(1)),
++      makeDirHandle('stage_confidence', [
++        makeFileHandle('categorisation.json', stageJson('categorisation', 0.9)),
++        makeFileHandle('extraction.json', stageJson('extraction', 0.5)),
++        makeFileHandle('summary.json', stageJson('summary', 0.1)), // excluded by default settings
++      ]),
++    ]);
++    const case2 = makeDirHandle('case2', [
++      makeFileHandle('consolidated_final.json', finalJson(0)),
++      makeDirHandle('stage_confidence', [
++        makeFileHandle('categorisation.json', stageJson('categorisation', 0.7)),
++      ]),
++    ]);
++    const root = makeDirHandle('root', [case1, case2]);
++
++    const progressCalls: Array<[number, number]> = [];
++    const rows = await loadCaseRows(root, DEFAULT_SETTINGS, (done, total) => {
++      progressCalls.push([done, total]);
++    });
++
++    expect(rows).toHaveLength(2);
++
++    const row1 = rows.find((r) => r.caseId === 'case1')!;
++    expect(row1.finalVerdict).toBe(1);
++    expect(row1.hasErrors).toBe(false);
++    expect(row1.stages.map((s) => s.fileName).sort()).toEqual([
++      'categorisation.json',
++      'extraction.json',
++    ]);
++    const cat = row1.stages.find((s) => s.fileName === 'categorisation.json')!;
++    expect(cat.label).toBe('categorisation');
++    expect(cat.score).toBe(0.9);
++
++    const row2 = rows.find((r) => r.caseId === 'case2')!;
++    expect(row2.finalVerdict).toBe(0);
++    expect(row2.hasErrors).toBe(false);
++    expect(row2.stages).toHaveLength(1);
++
++    // Progress: starts at (0, total), ends at (total, total), non-decreasing.
++    expect(progressCalls[0]).toEqual([0, 2]);
++    expect(progressCalls[progressCalls.length - 1]).toEqual([2, 2]);
++    for (let i = 1; i < progressCalls.length; i++) {
++      expect(progressCalls[i][0]).toBeGreaterThanOrEqual(progressCalls[i - 1][0]);
++    }
++  });
++
++  it('marks hasErrors and finalVerdict null when consolidated_final.json is missing', async () => {
++    const case1 = makeDirHandle(
++      'case1',
++      [
++        makeDirHandle('stage_confidence', [
++          makeFileHandle('categorisation.json', stageJson('categorisation', 0.9)),
++        ]),
++      ],
++      { missingNames: ['consolidated_final.json'] }
++    );
++    const root = makeDirHandle('root', [case1]);
++
++    const rows = await loadCaseRows(root, DEFAULT_SETTINGS, () => {});
++
++    expect(rows).toHaveLength(1);
++    expect(rows[0].finalVerdict).toBeNull();
++    expect(rows[0].hasErrors).toBe(true);
++    expect(rows[0].errorDetails.some((d) => d.includes('consolidated_final.json'))).toBe(true);
++  });
++
++  it('marks hasErrors true and stages: [] when stage_confidence/ is missing', async () => {
++    const case1 = makeDirHandle(
++      'case1',
++      [makeFileHandle('consolidated_final.json', finalJson(1))],
++      { missingNames: ['stage_confidence'] }
++    );
++    const root = makeDirHandle('root', [case1]);
++
++    const rows = await loadCaseRows(root, DEFAULT_SETTINGS, () => {});
++
++    expect(rows).toHaveLength(1);
++    expect(rows[0].finalVerdict).toBe(1);
++    expect(rows[0].stages).toEqual([]);
++    expect(rows[0].hasErrors).toBe(true);
++    expect(rows[0].errorDetails.some((d) => d.includes('stage_confidence'))).toBe(true);
++  });
++
++  it('produces a null-score StageResult with fileName/label fallback when a stage file fails to parse', async () => {
++    const case1 = makeDirHandle('case1', [
++      makeFileHandle('consolidated_final.json', finalJson(1)),
++      makeDirHandle('stage_confidence', [
++        makeFileHandle('broken.json', '{not valid json'),
++      ]),
++    ]);
++    const root = makeDirHandle('root', [case1]);
++
++    const rows = await loadCaseRows(root, DEFAULT_SETTINGS, () => {});
++
++    expect(rows).toHaveLength(1);
++    expect(rows[0].stages).toHaveLength(1);
++    expect(rows[0].stages[0]).toMatchObject({
++      fileName: 'broken.json',
++      label: 'broken.json',
++      score: null,
++      raw: null,
++    });
++    expect(rows[0].hasErrors).toBe(true);
++  });
++
++  it('marks hasErrors true and coerces to null when a configured getByPath resolves to undefined', async () => {
++    const case1 = makeDirHandle('case1', [
++      makeFileHandle('consolidated_final.json', JSON.stringify({ bill_summary: {} })), // case_verdict missing
++      makeDirHandle('stage_confidence', [
++        makeFileHandle('categorisation.json', JSON.stringify({ stage: 'categorisation' })), // score missing
++      ]),
++    ]);
++    const root = makeDirHandle('root', [case1]);
++
++    const rows = await loadCaseRows(root, DEFAULT_SETTINGS, () => {});
++
++    expect(rows).toHaveLength(1);
++    expect(rows[0].finalVerdict).toBeNull();
++    expect(rows[0].hasErrors).toBe(true);
++    expect(rows[0].stages[0].score).toBeNull();
++    expect(rows[0].stages[0].label).toBe('categorisation'); // label path resolved fine
++  });
++
++  it('respects stageOverrides over stageDefaults for label/value key paths', async () => {
++    const settings: SettingsConfig = {
++      ...DEFAULT_SETTINGS,
++      stageOverrides: {
++        'extraction.json': { valueKeyPath: 'confidence' },
++      },
++    };
++    const case1 = makeDirHandle('case1', [
++      makeFileHandle('consolidated_final.json', finalJson(1)),
++      makeDirHandle('stage_confidence', [
++        makeFileHandle(
++          'extraction.json',
++          JSON.stringify({ stage: 'extraction', confidence: 0.55 })
++        ),
++      ]),
++    ]);
++    const root = makeDirHandle('root', [case1]);
++
++    const rows = await loadCaseRows(root, settings, () => {});
++
++    expect(rows[0].stages[0].score).toBe(0.55);
++    expect(rows[0].hasErrors).toBe(false);
++  });
++
++  it('excludes files listed in settings.excludedStageFiles', async () => {
++    const case1 = makeDirHandle('case1', [
++      makeFileHandle('consolidated_final.json', finalJson(1)),
++      makeDirHandle('stage_confidence', [
++        makeFileHandle('summary.json', stageJson('summary', 0.99)),
++      ]),
++    ]);
++    const root = makeDirHandle('root', [case1]);
++
++    const rows = await loadCaseRows(root, DEFAULT_SETTINGS, () => {});
++
++    expect(rows[0].stages).toEqual([]);
++  });
++
++  it('never throws even when a case folder is thoroughly broken', async () => {
++    const brokenCase = makeDirHandle(
++      'broken-case',
++      [],
++      { missingNames: ['consolidated_final.json', 'stage_confidence'] }
++    );
++    const root = makeDirHandle('root', [brokenCase]);
++
++    await expect(loadCaseRows(root, DEFAULT_SETTINGS, () => {})).resolves.toHaveLength(1);
++  });
++
++  it('processes case folders in batches of 10, calling onProgress per batch', async () => {
++    const cases = Array.from({ length: 25 }, (_, i) =>
++      makeDirHandle(`case${i}`, [makeFileHandle('consolidated_final.json', finalJson(1))], {
++        missingNames: ['stage_confidence'],
++      })
++    );
++    const root = makeDirHandle('root', cases);
++
++    const progressCalls: Array<[number, number]> = [];
++    const rows = await loadCaseRows(root, DEFAULT_SETTINGS, (done, total) => {
++      progressCalls.push([done, total]);
++    });
++
++    expect(rows).toHaveLength(25);
++    // 25 items in batches of 10 -> progress after 10, 20, 25 (plus the initial 0).
++    expect(progressCalls).toEqual([
++      [0, 25],
++      [10, 25],
++      [20, 25],
++      [25, 25],
++    ]);
++  });
++});
+diff --git a/src/hooks/useDirectoryLoader.ts b/src/hooks/useDirectoryLoader.ts
+index 4419610..768ade0 100644
+--- a/src/hooks/useDirectoryLoader.ts
++++ b/src/hooks/useDirectoryLoader.ts
+@@ -1,27 +1,180 @@
+-import type { CaseRow, SettingsConfig } from '../lib/types';
+-
+-// ============================================================
+-// PLACEHOLDER — Task 4 implements this file for real.
+-// ============================================================
+-// This stub exists only so that Task 3 (src/store/appStore.ts) has a real
+-// module to import from `loadDirectory`, keeping `tsc -b` / `npm run build`
+-// and the test suite green before Task 4 lands.
+-//
+-// Task 4's implementer: REPLACE the body below with the actual directory
+-// ingestion logic (walk sub-directories via `listSubdirectories`, read JSON
+-// files via `listJsonFiles`/`readJsonFile` from `../lib/fsWalk`, resolve
+-// fields via `getByPath` from `../lib/jsonPath`, report progress via
+-// `onProgress`, and build one `CaseRow` per case folder). Do NOT import
+-// around this file or relocate it — `appStore.ts` imports `loadCaseRows`
+-// from this exact path/name.
++import { listJsonFiles, listSubdirectories, readJsonFile } from '../lib/fsWalk';
++import { getByPath } from '../lib/jsonPath';
++import type { CaseRow, SettingsConfig, StageResult } from '../lib/types';
++
++// Number of case folders processed concurrently per batch. Matches the
++// design doc's performance section: batched (not one giant Promise.all over
++// everything, and not fully serial).
++const BATCH_SIZE = 10;
++
++// Resolves the finalVerdict for a single case folder from its parsed
++// consolidated_final.json blob (or null if that file was missing/unparsable).
++// Coerces to 0 | 1 | null: only exactly 0 or 1 count as a value; anything
++// else (including a resolved-but-non-0/1 value) counts as an error.
++function resolveFinalVerdict(
++  finalRaw: unknown,
++  valueKeyPath: string
++): { finalVerdict: 0 | 1 | null; failed: boolean } {
++  const resolved = getByPath(finalRaw, valueKeyPath);
++  if (resolved === 0 || resolved === 1) {
++    return { finalVerdict: resolved, failed: false };
++  }
++  // Either undefined (path didn't resolve) or resolved to something that
++  // isn't 0/1 — both count as "unusable" per Req 1.10.
++  return { finalVerdict: null, failed: true };
++}
++
++// Resolves a stage's label/valueKeyPath the same way appStore.ts's
++// rederiveCaseRows does: settings.stageOverrides[fileName] takes precedence
++// over settings.stageDefaults.
++function resolveStageKeyPaths(
++  fileName: string,
++  settings: SettingsConfig
++): { labelKeyPath: string; valueKeyPath: string } {
++  const override = settings.stageOverrides[fileName];
++  return {
++    labelKeyPath: override?.labelKeyPath ?? settings.stageDefaults.labelKeyPath,
++    valueKeyPath: override?.valueKeyPath ?? settings.stageDefaults.valueKeyPath,
++  };
++}
++
++// Parses a single stage JSON file handle into a StageResult, absorbing any
++// read/parse failure into a null-score StageResult rather than throwing.
++async function parseStageFile(
++  fileHandle: FileSystemFileHandle,
++  settings: SettingsConfig,
++  errorDetails: string[]
++): Promise<StageResult> {
++  const fileName = fileHandle.name;
++
++  let raw: unknown = null;
++  try {
++    raw = await readJsonFile(fileHandle);
++  } catch {
++    errorDetails.push(`Stage file "${fileName}" could not be read or parsed`);
++    // Read/parse failure fallback: label = the full fileName (per the
++    // algorithm's "label = handle.name (fallback)").
++    return { fileName, label: fileName, score: null, raw: null };
++  }
++
++  const { labelKeyPath, valueKeyPath } = resolveStageKeyPaths(fileName, settings);
++
++  const labelResolved = getByPath(raw, labelKeyPath);
++  let label: string;
++  if (labelResolved === undefined) {
++    // labelKeyPath resolution failure fallback: fileName WITHOUT the
++    // ".json" extension (distinct from the read/parse-failure fallback above).
++    label = fileName.endsWith('.json') ? fileName.slice(0, -'.json'.length) : fileName;
++    errorDetails.push(`Could not resolve label for "${fileName}" at path "${labelKeyPath}"`);
++  } else {
++    label = typeof labelResolved === 'string' ? labelResolved : String(labelResolved);
++  }
++
++  const valueResolved = getByPath(raw, valueKeyPath);
++  let score: number | null;
++  if (typeof valueResolved === 'number') {
++    score = valueResolved;
++  } else {
++    score = null;
++    errorDetails.push(`Could not resolve score for "${fileName}" at path "${valueKeyPath}"`);
++  }
++
++  return { fileName, label, score, raw };
++}
++
++// Parses one case folder into a CaseRow. Absorbs ALL internal errors — never
++// throws — so a single bad case folder can never reject the whole batch.
++async function parseCaseFolder(
++  caseFolder: FileSystemDirectoryHandle,
++  settings: SettingsConfig
++): Promise<CaseRow> {
++  const errorDetails: string[] = [];
++  const caseId = caseFolder.name;
++
++  // --- consolidated_final.json ---
++  let finalRaw: unknown = null;
++  try {
++    const finalFileHandle = await caseFolder.getFileHandle(settings.finalVerdict.file);
++    finalRaw = await readJsonFile(finalFileHandle);
++  } catch {
++    finalRaw = null;
++    errorDetails.push(`"${settings.finalVerdict.file}" not found or unparsable`);
++  }
++
++  const { finalVerdict, failed: finalVerdictFailed } = resolveFinalVerdict(
++    finalRaw,
++    settings.finalVerdict.valueKeyPath
++  );
++  if (finalVerdictFailed && finalRaw !== null) {
++    // Only push a second error if the file itself was fine but the path
++    // resolution failed — avoid double-reporting when the file was missing.
++    errorDetails.push(
++      `Could not resolve finalVerdict at path "${settings.finalVerdict.valueKeyPath}"`
++    );
++  }
++
++  // --- stage_confidence/ ---
++  let stages: StageResult[] = [];
++  let stageDirHandle: FileSystemDirectoryHandle | null = null;
++  try {
++    stageDirHandle = await caseFolder.getDirectoryHandle('stage_confidence');
++  } catch {
++    stageDirHandle = null;
++    errorDetails.push('stage_confidence/ directory not found');
++  }
++  if (stageDirHandle !== null) {
++    const stageFileHandles = await listJsonFiles(stageDirHandle, settings.excludedStageFiles);
++    stages = await Promise.all(
++      stageFileHandles.map((fh) => parseStageFile(fh, settings, errorDetails))
++    );
++  }
++
++  return {
++    caseId,
++    finalVerdict,
++    finalRaw,
++    stages,
++    hasErrors: errorDetails.length > 0,
++    errorDetails,
++  };
++}
++
+ export async function loadCaseRows(
+   handle: FileSystemDirectoryHandle,
+   settings: SettingsConfig,
+   onProgress: (done: number, total: number) => void
+ ): Promise<CaseRow[]> {
+-  // Referenced so `noUnusedParameters` doesn't flag the stub's signature.
+-  void handle;
+-  void settings;
+-  void onProgress;
+-  throw new Error('not implemented — see Task 4');
++  const caseFolders = await listSubdirectories(handle);
++  const total = caseFolders.length;
++  onProgress(0, total);
++
++  const rows: CaseRow[] = [];
++  let done = 0;
++
++  for (let i = 0; i < caseFolders.length; i += BATCH_SIZE) {
++    const batch = caseFolders.slice(i, i + BATCH_SIZE);
++    const batchRows = await Promise.all(
++      batch.map(async (caseFolder) => {
++        try {
++          return await parseCaseFolder(caseFolder, settings);
++        } catch (err) {
++          // Absolute last resort — parseCaseFolder should never throw, but
++          // guarantee no per-case failure can ever escape loadCaseRows.
++          return {
++            caseId: caseFolder.name,
++            finalVerdict: null,
++            finalRaw: null,
++            stages: [],
++            hasErrors: true,
++            errorDetails: [`Unexpected error while parsing case folder: ${String(err)}`],
++          } satisfies CaseRow;
++        }
++      })
++    );
++    rows.push(...batchRows);
++    done += batch.length;
++    onProgress(done, total);
++  }
++
++  return rows;
+ }
+diff --git a/src/hooks/usePersistedSettings.ts b/src/hooks/usePersistedSettings.ts
+new file mode 100644
+index 0000000..0a13814
+--- /dev/null
++++ b/src/hooks/usePersistedSettings.ts
+@@ -0,0 +1,45 @@
++import { useState } from 'react';
++import { DEFAULT_SETTINGS } from '../lib/types';
++import type { SettingsConfig } from '../lib/types';
++
++const STORAGE_KEY = 'crd_settings';
++
++// Reads and parses the persisted settings from localStorage, shallow-merging
++// over DEFAULT_SETTINGS so newly-added default fields in a future app
++// version aren't lost by an old stored config missing them. Never throws —
++// falls back to DEFAULT_SETTINGS on any failure (missing key, invalid JSON,
++// or localStorage access denied e.g. in private/incognito mode).
++function readPersistedSettings(): SettingsConfig {
++  try {
++    const stored = localStorage.getItem(STORAGE_KEY);
++    if (stored === null) {
++      return DEFAULT_SETTINGS;
++    }
++    const parsed = JSON.parse(stored);
++    return { ...DEFAULT_SETTINGS, ...parsed };
++  } catch {
++    return DEFAULT_SETTINGS;
++  }
++}
++
++export function usePersistedSettings(): [
++  SettingsConfig,
++  (patch: Partial<SettingsConfig>) => void,
++] {
++  const [settings, setSettings] = useState<SettingsConfig>(readPersistedSettings);
++
++  function updatePersistedSettings(patch: Partial<SettingsConfig>) {
++    setSettings((current) => {
++      const merged = { ...current, ...patch };
++      try {
++        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
++      } catch {
++        // Write failure (e.g. private mode) — settings continue working
++        // in-memory for the session per design.md's error table.
++      }
++      return merged;
++    });
++  }
++
++  return [settings, updatePersistedSettings];
++}
+diff --git a/src/lib/dirHandleStore.ts b/src/lib/dirHandleStore.ts
+new file mode 100644
+index 0000000..eabae29
+--- /dev/null
++++ b/src/lib/dirHandleStore.ts
+@@ -0,0 +1,23 @@
++// Persistence for the last-used directory handle, via idb-keyval.
++// The ambient FileSystemDirectoryHandle/PermissionState types are declared
++// globally in src/vite-env.d.ts — no import needed.
++import { get, set } from 'idb-keyval';
++
++const DIR_HANDLE_KEY = 'crd_dir_handle';
++
++export async function saveDirHandle(handle: FileSystemDirectoryHandle): Promise<void> {
++  await set(DIR_HANDLE_KEY, handle);
++}
++
++// Resolves to undefined when no handle has been stored yet — idb-keyval's
++// `get` resolves to undefined when the key is absent. That is the normal
++// "no stored folder yet" case, not an error.
++export async function loadDirHandle(): Promise<FileSystemDirectoryHandle | undefined> {
++  return get<FileSystemDirectoryHandle>(DIR_HANDLE_KEY);
++}
++
++export async function queryDirHandlePermission(
++  handle: FileSystemDirectoryHandle
++): Promise<PermissionState> {
++  return handle.queryPermission({ mode: 'read' });
++}
+diff --git a/src/store/appStore.ts b/src/store/appStore.ts
+index c9f61e8..7776223 100644
+--- a/src/store/appStore.ts
++++ b/src/store/appStore.ts
+@@ -1,28 +1,22 @@
+ import { create } from 'zustand';
+ import { getByPath } from '../lib/jsonPath';
+ import type {
+   AppStore,
+   CaseRow,
+   FilterState,
+   SettingsConfig,
+   StageResult,
+ } from '../lib/types';
+ import { DEFAULT_SETTINGS } from '../lib/types';
+-// NOTE: Task 4 dependency — `loadCaseRows` does not exist yet as a real
+-// implementation. This import will fail to resolve (and `npm run build` /
+-// `tsc -b` will fail) until Task 4 creates `src/hooks/useDirectoryLoader.ts`.
+-// A placeholder file has been created (see that file's header comment) purely
+-// so this task's own build/tests stay green; Task 4's implementer should
+-// REPLACE the placeholder's body with the real ingestion logic, not import
+-// around it or relocate this import.
+ import { loadCaseRows } from '../hooks/useDirectoryLoader';
++import { saveDirHandle } from '../lib/dirHandleStore';
+ 
+ // ============================================================
+ // Filter predicate helpers (module-level, pure functions)
+ // ============================================================
+ 
+ export function matchesCaseIdFilter(row: CaseRow, text: string): boolean {
+   if (text === '') return true;
+   return row.caseId.toLowerCase().includes(text.toLowerCase());
+ }
+ 
+@@ -190,20 +184,24 @@ export const useAppStore = create<AppStore>((set, get) => ({
+         set({ loadingProgress: { done, total } });
+       });
+       const stageColumns = deriveStageColumns(rows);
+       const filteredRows = applyAllFilters(rows, get().filters, get().settings);
+       set({
+         allCaseRows: rows,
+         stageColumns,
+         filteredRows,
+         loadingProgress: null,
+       });
++      // Fire-and-forget: don't block the load on persisting the handle.
++      saveDirHandle(handle).catch((err) => {
++        console.warn('saveDirHandle failed:', err);
++      });
+     } catch (err) {
+       console.error('loadDirectory failed:', err);
+       set({ loadingProgress: null });
+     }
+   },
+ 
+   rederiveCaseRows() {
+     const { allCaseRows, settings, filters } = get();
+     const rederived = allCaseRows.map((row) => rederiveRow(row, settings));
+     const stageColumns = deriveStageColumns(rederived);

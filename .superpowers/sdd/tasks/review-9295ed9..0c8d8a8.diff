@@ -1,0 +1,681 @@
+# Review package: 9295ed9..0c8d8a8
+
+## Commits
+0c8d8a8 Implement Zustand store with filter predicates and row rederivation (Task 3)
+
+## Files changed
+ src/hooks/useDirectoryLoader.ts |  27 +++
+ src/store/appStore.test.ts      | 352 ++++++++++++++++++++++++++++++++++++++++
+ src/store/appStore.ts           | 272 +++++++++++++++++++++++++++++++
+ 3 files changed, 651 insertions(+)
+
+## Diff
+diff --git a/src/hooks/useDirectoryLoader.ts b/src/hooks/useDirectoryLoader.ts
+new file mode 100644
+index 0000000..4419610
+--- /dev/null
++++ b/src/hooks/useDirectoryLoader.ts
+@@ -0,0 +1,27 @@
++import type { CaseRow, SettingsConfig } from '../lib/types';
++
++// ============================================================
++// PLACEHOLDER — Task 4 implements this file for real.
++// ============================================================
++// This stub exists only so that Task 3 (src/store/appStore.ts) has a real
++// module to import from `loadDirectory`, keeping `tsc -b` / `npm run build`
++// and the test suite green before Task 4 lands.
++//
++// Task 4's implementer: REPLACE the body below with the actual directory
++// ingestion logic (walk sub-directories via `listSubdirectories`, read JSON
++// files via `listJsonFiles`/`readJsonFile` from `../lib/fsWalk`, resolve
++// fields via `getByPath` from `../lib/jsonPath`, report progress via
++// `onProgress`, and build one `CaseRow` per case folder). Do NOT import
++// around this file or relocate it — `appStore.ts` imports `loadCaseRows`
++// from this exact path/name.
++export async function loadCaseRows(
++  handle: FileSystemDirectoryHandle,
++  settings: SettingsConfig,
++  onProgress: (done: number, total: number) => void
++): Promise<CaseRow[]> {
++  // Referenced so `noUnusedParameters` doesn't flag the stub's signature.
++  void handle;
++  void settings;
++  void onProgress;
++  throw new Error('not implemented — see Task 4');
++}
+diff --git a/src/store/appStore.test.ts b/src/store/appStore.test.ts
+new file mode 100644
+index 0000000..cddc115
+--- /dev/null
++++ b/src/store/appStore.test.ts
+@@ -0,0 +1,352 @@
++import { beforeEach, describe, expect, it } from 'vitest';
++import {
++  matchesCaseIdFilter,
++  matchesHasErrorsFilter,
++  matchesStageFilter,
++  matchesVerdictFilter,
++  useAppStore,
++} from './appStore';
++import { DEFAULT_SETTINGS } from '../lib/types';
++import type { CaseRow, SettingsConfig, StageResult } from '../lib/types';
++
++function makeStage(fileName: string, score: number | null, raw: unknown = null): StageResult {
++  return { fileName, label: fileName, score, raw: raw ?? { score } };
++}
++
++function makeRow(overrides: Partial<CaseRow> = {}): CaseRow {
++  return {
++    caseId: 'case1',
++    finalVerdict: null,
++    finalRaw: { bill_summary: { case_verdict: 1 } },
++    stages: [],
++    hasErrors: false,
++    errorDetails: [],
++    ...overrides,
++  };
++}
++
++// ============================================================
++// Filter predicate helpers
++// ============================================================
++
++describe('matchesCaseIdFilter', () => {
++  it('matches everything when text is empty', () => {
++    expect(matchesCaseIdFilter(makeRow({ caseId: 'CASE-123' }), '')).toBe(true);
++  });
++
++  it('matches case-insensitive substrings', () => {
++    expect(matchesCaseIdFilter(makeRow({ caseId: 'CASE-123' }), 'case-1')).toBe(true);
++    expect(matchesCaseIdFilter(makeRow({ caseId: 'CASE-123' }), 'case-9')).toBe(false);
++  });
++});
++
++describe('matchesVerdictFilter', () => {
++  it('matches everything when v is "all"', () => {
++    expect(matchesVerdictFilter(makeRow({ finalVerdict: null }), 'all')).toBe(true);
++  });
++
++  it('matches exact verdict', () => {
++    expect(matchesVerdictFilter(makeRow({ finalVerdict: 1 }), 1)).toBe(true);
++    expect(matchesVerdictFilter(makeRow({ finalVerdict: 0 }), 1)).toBe(false);
++    expect(matchesVerdictFilter(makeRow({ finalVerdict: null }), 0)).toBe(false);
++  });
++});
++
++describe('matchesHasErrorsFilter', () => {
++  it('matches everything when hasErrorsOnly is false', () => {
++    expect(matchesHasErrorsFilter(makeRow({ hasErrors: false }), false)).toBe(true);
++    expect(matchesHasErrorsFilter(makeRow({ hasErrors: true }), false)).toBe(true);
++  });
++
++  it('requires hasErrors === true when hasErrorsOnly is true', () => {
++    expect(matchesHasErrorsFilter(makeRow({ hasErrors: true }), true)).toBe(true);
++    expect(matchesHasErrorsFilter(makeRow({ hasErrors: false }), true)).toBe(false);
++  });
++});
++
++describe('matchesStageFilter', () => {
++  const threshold = 0.7;
++
++  it('treats a missing stage entry as a null score', () => {
++    const row = makeRow({ stages: [] });
++    expect(
++      matchesStageFilter(row, 'categorisation.json', { min: 0.5, max: null, lowConfOnly: false }, threshold)
++    ).toBe(false);
++  });
++
++  it('matches everything when min, max are null and lowConfOnly is false', () => {
++    const row = makeRow({ stages: [makeStage('categorisation.json', null)] });
++    expect(
++      matchesStageFilter(row, 'categorisation.json', { min: null, max: null, lowConfOnly: false }, threshold)
++    ).toBe(true);
++  });
++
++  it('lowConfOnly requires a non-null score below the threshold', () => {
++    const lowRow = makeRow({ stages: [makeStage('categorisation.json', 0.5)] });
++    const highRow = makeRow({ stages: [makeStage('categorisation.json', 0.9)] });
++    const nullRow = makeRow({ stages: [makeStage('categorisation.json', null)] });
++
++    expect(
++      matchesStageFilter(lowRow, 'categorisation.json', { min: null, max: null, lowConfOnly: true }, threshold)
++    ).toBe(true);
++    expect(
++      matchesStageFilter(highRow, 'categorisation.json', { min: null, max: null, lowConfOnly: true }, threshold)
++    ).toBe(false);
++    expect(
++      matchesStageFilter(nullRow, 'categorisation.json', { min: null, max: null, lowConfOnly: true }, threshold)
++    ).toBe(false);
++  });
++
++  it('applies min/max range and excludes null scores when a range is active', () => {
++    const row = makeRow({ stages: [makeStage('categorisation.json', 0.8)] });
++    const nullRow = makeRow({ stages: [makeStage('categorisation.json', null)] });
++
++    expect(
++      matchesStageFilter(row, 'categorisation.json', { min: 0.7, max: 0.9, lowConfOnly: false }, threshold)
++    ).toBe(true);
++    expect(
++      matchesStageFilter(row, 'categorisation.json', { min: 0.85, max: null, lowConfOnly: false }, threshold)
++    ).toBe(false);
++    expect(
++      matchesStageFilter(row, 'categorisation.json', { min: null, max: 0.75, lowConfOnly: false }, threshold)
++    ).toBe(false);
++    expect(
++      matchesStageFilter(nullRow, 'categorisation.json', { min: 0.5, max: null, lowConfOnly: false }, threshold)
++    ).toBe(false);
++  });
++});
++
++// ============================================================
++// Store actions
++// ============================================================
++
++function resetStore() {
++  useAppStore.setState({
++    allCaseRows: [],
++    stageColumns: [],
++    loadingProgress: null,
++    settings: DEFAULT_SETTINGS,
++    sidebarOpen: false,
++    settingsPanelOpen: false,
++    modalState: null,
++    filters: { caseIdText: '', finalVerdict: 'all', stages: {}, hasErrorsOnly: false },
++    filteredRows: [],
++    insightsScope: 'filtered',
++  });
++}
++
++describe('rederiveCaseRows', () => {
++  beforeEach(resetStore);
++
++  it('recomputes finalVerdict, stage label/score, hasErrors, and stageColumns from current settings', () => {
++    const rows: CaseRow[] = [
++      {
++        caseId: 'case1',
++        finalVerdict: null,
++        finalRaw: { bill_summary: { case_verdict: 1 } },
++        stages: [
++          { fileName: 'categorisation.json', label: '', score: null, raw: { stage: 'cat', score: 0.9 } },
++        ],
++        hasErrors: true,
++        errorDetails: ['stale'],
++      },
++    ];
++
++    useAppStore.setState({ allCaseRows: rows });
++    useAppStore.getState().rederiveCaseRows();
++
++    const state = useAppStore.getState();
++    expect(state.allCaseRows[0].finalVerdict).toBe(1);
++    expect(state.allCaseRows[0].stages[0].label).toBe('cat');
++    expect(state.allCaseRows[0].stages[0].score).toBe(0.9);
++    expect(state.allCaseRows[0].hasErrors).toBe(false);
++    expect(state.stageColumns).toEqual(['categorisation.json']);
++    expect(state.filteredRows).toHaveLength(1);
++  });
++
++  it('marks hasErrors true and coerces finalVerdict to null when the configured path fails to resolve', () => {
++    const rows: CaseRow[] = [
++      {
++        caseId: 'case1',
++        finalVerdict: 1,
++        finalRaw: { bill_summary: {} }, // case_verdict missing
++        stages: [
++          { fileName: 'categorisation.json', label: 'x', score: 0.9, raw: {} }, // score missing too
++        ],
++        hasErrors: false,
++        errorDetails: [],
++      },
++    ];
++
++    useAppStore.setState({ allCaseRows: rows });
++    useAppStore.getState().rederiveCaseRows();
++
++    const row = useAppStore.getState().allCaseRows[0];
++    expect(row.finalVerdict).toBeNull();
++    expect(row.stages[0].score).toBeNull();
++    expect(row.stages[0].label).toBe('categorisation.json'); // falls back to fileName
++    expect(row.hasErrors).toBe(true);
++    expect(row.errorDetails.length).toBeGreaterThan(0);
++  });
++
++  it('respects stageOverrides for label/value key paths over stageDefaults', () => {
++    const settings: SettingsConfig = {
++      ...DEFAULT_SETTINGS,
++      stageOverrides: {
++        'extraction.json': { valueKeyPath: 'confidence' },
++      },
++    };
++    const rows: CaseRow[] = [
++      {
++        caseId: 'case1',
++        finalVerdict: null,
++        finalRaw: { bill_summary: { case_verdict: 0 } },
++        stages: [
++          { fileName: 'extraction.json', label: '', score: null, raw: { stage: 'extraction', confidence: 0.55 } },
++        ],
++        hasErrors: false,
++        errorDetails: [],
++      },
++    ];
++
++    useAppStore.setState({ allCaseRows: rows, settings });
++    useAppStore.getState().rederiveCaseRows();
++
++    expect(useAppStore.getState().allCaseRows[0].stages[0].score).toBe(0.55);
++  });
++});
++
++describe('setFilter / clearFilter / clearAllFilters', () => {
++  beforeEach(resetStore);
++
++  it('setFilter shallow-merges at the top level and replaces filters.stages wholesale', () => {
++    useAppStore.getState().setFilter({ caseIdText: 'abc' });
++    expect(useAppStore.getState().filters.caseIdText).toBe('abc');
++    expect(useAppStore.getState().filters.finalVerdict).toBe('all');
++
++    useAppStore.getState().setFilter({ stages: { 'categorisation.json': { min: 0.5, max: null, lowConfOnly: false } } });
++    expect(useAppStore.getState().filters.stages).toEqual({
++      'categorisation.json': { min: 0.5, max: null, lowConfOnly: false },
++    });
++
++    // A subsequent setFilter with a different stages map REPLACES, not merges.
++    useAppStore.getState().setFilter({ stages: { 'extraction.json': { min: null, max: 0.9, lowConfOnly: false } } });
++    expect(useAppStore.getState().filters.stages).toEqual({
++      'extraction.json': { min: null, max: 0.9, lowConfOnly: false },
++    });
++  });
++
++  it('setFilter recomputes filteredRows', () => {
++    const rows: CaseRow[] = [makeRow({ caseId: 'alpha' }), makeRow({ caseId: 'beta' })];
++    useAppStore.setState({ allCaseRows: rows, filteredRows: rows });
++
++    useAppStore.getState().setFilter({ caseIdText: 'alp' });
++    expect(useAppStore.getState().filteredRows.map((r) => r.caseId)).toEqual(['alpha']);
++  });
++
++  it('clearFilter resets a single key to its default', () => {
++    useAppStore.getState().setFilter({ caseIdText: 'abc', hasErrorsOnly: true });
++    useAppStore.getState().clearFilter('caseIdText');
++
++    const filters = useAppStore.getState().filters;
++    expect(filters.caseIdText).toBe('');
++    expect(filters.hasErrorsOnly).toBe(true); // untouched
++  });
++
++  it('clearAllFilters resets the entire filters object', () => {
++    useAppStore.getState().setFilter({
++      caseIdText: 'abc',
++      finalVerdict: 1,
++      hasErrorsOnly: true,
++      stages: { 'x.json': { min: 1, max: 2, lowConfOnly: true } },
++    });
++    useAppStore.getState().clearAllFilters();
++
++    expect(useAppStore.getState().filters).toEqual({
++      caseIdText: '',
++      finalVerdict: 'all',
++      stages: {},
++      hasErrorsOnly: false,
++    });
++  });
++});
++
++describe('updateSettings', () => {
++  beforeEach(resetStore);
++
++  it('shallow-merges the patch into settings and recomputes filteredRows, without rederiving rows', () => {
++    const rows: CaseRow[] = [
++      makeRow({
++        caseId: 'case1',
++        stages: [makeStage('categorisation.json', 0.5)],
++      }),
++    ];
++    useAppStore.setState({
++      allCaseRows: rows,
++      filteredRows: rows,
++      filters: {
++        caseIdText: '',
++        finalVerdict: 'all',
++        stages: { 'categorisation.json': { min: null, max: null, lowConfOnly: true } },
++        hasErrorsOnly: false,
++      },
++    });
++
++    // Score 0.5 is below default threshold 0.70, so it currently matches lowConfOnly.
++    expect(useAppStore.getState().filteredRows).toHaveLength(1);
++
++    // Lowering the threshold below 0.5 should exclude the row without touching allCaseRows.
++    useAppStore.getState().updateSettings({ lowConfidenceThreshold: 0.3 });
++
++    expect(useAppStore.getState().settings.lowConfidenceThreshold).toBe(0.3);
++    expect(useAppStore.getState().filteredRows).toHaveLength(0);
++    expect(useAppStore.getState().allCaseRows[0].stages[0].score).toBe(0.5); // unchanged — no rederive
++  });
++});
++
++describe('openModal / closeModal', () => {
++  beforeEach(resetStore);
++
++  it('openModal sets modalState and closeModal clears it', () => {
++    useAppStore.getState().openModal('case1', 'categorisation.json', { a: 1 });
++    expect(useAppStore.getState().modalState).toEqual({
++      caseId: 'case1',
++      fileName: 'categorisation.json',
++      json: { a: 1 },
++    });
++
++    useAppStore.getState().closeModal();
++    expect(useAppStore.getState().modalState).toBeNull();
++  });
++});
++
++describe('toggleSidebar / toggleSettingsPanel / setInsightsScope', () => {
++  beforeEach(resetStore);
++
++  it('toggles booleans and sets scope', () => {
++    expect(useAppStore.getState().sidebarOpen).toBe(false);
++    useAppStore.getState().toggleSidebar();
++    expect(useAppStore.getState().sidebarOpen).toBe(true);
++
++    expect(useAppStore.getState().settingsPanelOpen).toBe(false);
++    useAppStore.getState().toggleSettingsPanel();
++    expect(useAppStore.getState().settingsPanelOpen).toBe(true);
++
++    useAppStore.getState().setInsightsScope('all');
++    expect(useAppStore.getState().insightsScope).toBe('all');
++  });
++});
++
++describe('loadDirectory', () => {
++  beforeEach(resetStore);
++
++  it('sets loadingProgress back to null and does not touch allCaseRows when the loader rejects', async () => {
++    const fakeHandle = {} as FileSystemDirectoryHandle;
++    // The placeholder loadCaseRows always throws — this exercises the
++    // error-handling branch without needing Task 4's real implementation.
++    await useAppStore.getState().loadDirectory(fakeHandle);
++
++    expect(useAppStore.getState().loadingProgress).toBeNull();
++    expect(useAppStore.getState().allCaseRows).toEqual([]);
++  });
++});
+diff --git a/src/store/appStore.ts b/src/store/appStore.ts
+new file mode 100644
+index 0000000..c9f61e8
+--- /dev/null
++++ b/src/store/appStore.ts
+@@ -0,0 +1,272 @@
++import { create } from 'zustand';
++import { getByPath } from '../lib/jsonPath';
++import type {
++  AppStore,
++  CaseRow,
++  FilterState,
++  SettingsConfig,
++  StageResult,
++} from '../lib/types';
++import { DEFAULT_SETTINGS } from '../lib/types';
++// NOTE: Task 4 dependency — `loadCaseRows` does not exist yet as a real
++// implementation. This import will fail to resolve (and `npm run build` /
++// `tsc -b` will fail) until Task 4 creates `src/hooks/useDirectoryLoader.ts`.
++// A placeholder file has been created (see that file's header comment) purely
++// so this task's own build/tests stay green; Task 4's implementer should
++// REPLACE the placeholder's body with the real ingestion logic, not import
++// around it or relocate this import.
++import { loadCaseRows } from '../hooks/useDirectoryLoader';
++
++// ============================================================
++// Filter predicate helpers (module-level, pure functions)
++// ============================================================
++
++export function matchesCaseIdFilter(row: CaseRow, text: string): boolean {
++  if (text === '') return true;
++  return row.caseId.toLowerCase().includes(text.toLowerCase());
++}
++
++export function matchesVerdictFilter(row: CaseRow, v: FilterState['finalVerdict']): boolean {
++  if (v === 'all') return true;
++  return row.finalVerdict === v;
++}
++
++export function matchesHasErrorsFilter(row: CaseRow, hasErrorsOnly: boolean): boolean {
++  if (!hasErrorsOnly) return true;
++  return row.hasErrors === true;
++}
++
++export function matchesStageFilter(
++  row: CaseRow,
++  fileName: string,
++  stageFilter: { min: number | null; max: number | null; lowConfOnly: boolean },
++  lowConfidenceThreshold: number
++): boolean {
++  const stage = row.stages.find((s) => s.fileName === fileName);
++  const score = stage ? stage.score : null;
++
++  if (stageFilter.lowConfOnly) {
++    return score !== null && score < lowConfidenceThreshold;
++  }
++
++  if (stageFilter.min === null && stageFilter.max === null) {
++    // No range constraint active for this stage — matches everything,
++    // including rows with a null score (an empty filter must not exclude rows).
++    return true;
++  }
++
++  if (stageFilter.min !== null && !(score !== null && score >= stageFilter.min)) {
++    return false;
++  }
++  if (stageFilter.max !== null && !(score !== null && score <= stageFilter.max)) {
++    return false;
++  }
++  return true;
++}
++
++export function applyAllFilters(
++  rows: CaseRow[],
++  filters: FilterState,
++  settings: SettingsConfig
++): CaseRow[] {
++  return rows.filter(
++    (row) =>
++      matchesCaseIdFilter(row, filters.caseIdText) &&
++      matchesVerdictFilter(row, filters.finalVerdict) &&
++      matchesHasErrorsFilter(row, filters.hasErrorsOnly) &&
++      Object.entries(filters.stages).every(([fileName, stageFilter]) =>
++        matchesStageFilter(row, fileName, stageFilter, settings.lowConfidenceThreshold)
++      )
++  );
++}
++
++// Sorted union of all distinct StageResult.fileName values across every row.
++function deriveStageColumns(rows: CaseRow[]): string[] {
++  const names = new Set<string>();
++  for (const row of rows) {
++    for (const stage of row.stages) {
++      names.add(stage.fileName);
++    }
++  }
++  return Array.from(names).sort();
++}
++
++const DEFAULT_FILTERS: FilterState = {
++  caseIdText: '',
++  finalVerdict: 'all',
++  stages: {},
++  hasErrorsOnly: false,
++};
++
++// Resolves a value at `path` on `raw`, coercing it to a number or null.
++function resolveScore(raw: unknown, path: string): { score: number | null; failed: boolean } {
++  const resolved = getByPath(raw, path);
++  if (resolved === undefined) {
++    return { score: null, failed: true };
++  }
++  return { score: typeof resolved === 'number' ? resolved : null, failed: false };
++}
++
++// Resolves a label at `path` on `raw`. Falls back to `fallback` (the stage's
++// fileName) if the path fails to resolve; stringifies non-string results.
++function resolveLabel(
++  raw: unknown,
++  path: string,
++  fallback: string
++): { label: string; failed: boolean } {
++  const resolved = getByPath(raw, path);
++  if (resolved === undefined) {
++    return { label: fallback, failed: true };
++  }
++  return { label: typeof resolved === 'string' ? resolved : String(resolved), failed: false };
++}
++
++// Recomputes finalVerdict, stages[].label/score, and hasErrors for a single
++// row from its already-parsed raw/finalRaw blobs, using the given settings.
++// Pure — no filesystem I/O.
++function rederiveRow(row: CaseRow, settings: SettingsConfig): CaseRow {
++  const errorDetails: string[] = [];
++
++  const finalVerdictResolved = getByPath(row.finalRaw, settings.finalVerdict.valueKeyPath);
++  const finalVerdict: 0 | 1 | null =
++    finalVerdictResolved === 0 || finalVerdictResolved === 1 ? finalVerdictResolved : null;
++  if (finalVerdictResolved === undefined) {
++    errorDetails.push(
++      `Could not resolve finalVerdict at path "${settings.finalVerdict.valueKeyPath}"`
++    );
++  }
++
++  const stages: StageResult[] = row.stages.map((stage) => {
++    const override = settings.stageOverrides[stage.fileName];
++    const labelKeyPath = override?.labelKeyPath ?? settings.stageDefaults.labelKeyPath;
++    const valueKeyPath = override?.valueKeyPath ?? settings.stageDefaults.valueKeyPath;
++
++    const { label, failed: labelFailed } = resolveLabel(stage.raw, labelKeyPath, stage.fileName);
++    const { score, failed: scoreFailed } = resolveScore(stage.raw, valueKeyPath);
++
++    if (labelFailed) {
++      errorDetails.push(`Could not resolve label for "${stage.fileName}" at path "${labelKeyPath}"`);
++    }
++    if (scoreFailed) {
++      errorDetails.push(`Could not resolve score for "${stage.fileName}" at path "${valueKeyPath}"`);
++    }
++
++    return { ...stage, label, score };
++  });
++
++  const hasErrors = errorDetails.length > 0;
++
++  return {
++    ...row,
++    finalVerdict,
++    stages,
++    hasErrors,
++    errorDetails,
++  };
++}
++
++export const useAppStore = create<AppStore>((set, get) => ({
++  allCaseRows: [],
++  stageColumns: [],
++  loadingProgress: null,
++
++  settings: DEFAULT_SETTINGS,
++
++  sidebarOpen: false,
++  settingsPanelOpen: false,
++  modalState: null,
++
++  filters: { ...DEFAULT_FILTERS, stages: {} },
++
++  filteredRows: [],
++
++  insightsScope: 'filtered',
++
++  async loadDirectory(handle) {
++    set({ loadingProgress: { done: 0, total: 0 } });
++    try {
++      const { settings } = get();
++      const rows = await loadCaseRows(handle, settings, (done, total) => {
++        set({ loadingProgress: { done, total } });
++      });
++      const stageColumns = deriveStageColumns(rows);
++      const filteredRows = applyAllFilters(rows, get().filters, get().settings);
++      set({
++        allCaseRows: rows,
++        stageColumns,
++        filteredRows,
++        loadingProgress: null,
++      });
++    } catch (err) {
++      console.error('loadDirectory failed:', err);
++      set({ loadingProgress: null });
++    }
++  },
++
++  rederiveCaseRows() {
++    const { allCaseRows, settings, filters } = get();
++    const rederived = allCaseRows.map((row) => rederiveRow(row, settings));
++    const stageColumns = deriveStageColumns(rederived);
++    const filteredRows = applyAllFilters(rederived, filters, settings);
++    set({ allCaseRows: rederived, stageColumns, filteredRows });
++  },
++
++  openModal(caseId, fileName, json) {
++    set({ modalState: { caseId, fileName, json } });
++  },
++
++  closeModal() {
++    set({ modalState: null });
++  },
++
++  // Contract: shallow merge at the TOP LEVEL ONLY. If `update.stages` is
++  // present, it REPLACES the entire `filters.stages` map — it is not merged
++  // key-by-key. Callers that want to update a single stage's filter must
++  // spread the existing `filters.stages` map themselves and pass the full
++  // desired map, e.g.:
++  //   setFilter({ stages: { ...get().filters.stages, [fileName]: newStageFilter } })
++  // This keeps the merge semantics simple and unambiguous for Task 8
++  // (ColumnFilterHeader).
++  setFilter(update) {
++    const { filters, allCaseRows, settings } = get();
++    const nextFilters: FilterState = { ...filters, ...update };
++    const filteredRows = applyAllFilters(allCaseRows, nextFilters, settings);
++    set({ filters: nextFilters, filteredRows });
++  },
++
++  clearFilter(key) {
++    const { filters, allCaseRows, settings } = get();
++    const nextFilters: FilterState = { ...filters, [key]: DEFAULT_FILTERS[key] };
++    const filteredRows = applyAllFilters(allCaseRows, nextFilters, settings);
++    set({ filters: nextFilters, filteredRows });
++  },
++
++  clearAllFilters() {
++    const { allCaseRows, settings } = get();
++    const nextFilters: FilterState = { ...DEFAULT_FILTERS, stages: {} };
++    const filteredRows = applyAllFilters(allCaseRows, nextFilters, settings);
++    set({ filters: nextFilters, filteredRows });
++  },
++
++  toggleSidebar() {
++    set((state) => ({ sidebarOpen: !state.sidebarOpen }));
++  },
++
++  toggleSettingsPanel() {
++    set((state) => ({ settingsPanelOpen: !state.settingsPanelOpen }));
++  },
++
++  setInsightsScope(scope) {
++    set({ insightsScope: scope });
++  },
++
++  // Note: does NOT call rederiveCaseRows() automatically. Per the design,
++  // the SettingsPanel's "Save" button explicitly calls
++  // store.rederiveCaseRows() after updateSettings (see Task 12).
++  updateSettings(patch) {
++    const { settings, allCaseRows, filters } = get();
++    const nextSettings: SettingsConfig = { ...settings, ...patch };
++    const filteredRows = applyAllFilters(allCaseRows, filters, nextSettings);
++    set({ settings: nextSettings, filteredRows });
++  },
++}));

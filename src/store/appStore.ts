@@ -10,6 +10,8 @@ import type {
 import { DEFAULT_SETTINGS } from '../lib/types';
 import { loadCaseRows } from '../hooks/useDirectoryLoader';
 import { saveDirHandle } from '../lib/dirHandleStore';
+import { countBillTypeMatchingMethods } from '../lib/billTypeMatching';
+import { extractTokenSummary } from '../lib/tokenSummary';
 
 // ============================================================
 // Filter predicate helpers (module-level, pure functions)
@@ -28,6 +30,11 @@ export function matchesVerdictFilter(row: CaseRow, v: FilterState['finalVerdict'
 export function matchesHasErrorsFilter(row: CaseRow, hasErrorsOnly: boolean): boolean {
   if (!hasErrorsOnly) return true;
   return row.hasErrors === true;
+}
+
+export function matchesAmountMismatchFilter(row: CaseRow, amountMismatchOnly: boolean): boolean {
+  if (!amountMismatchOnly) return true;
+  return row.amountMismatch === true;
 }
 
 export function matchesStageFilter(
@@ -68,6 +75,7 @@ export function applyAllFilters(
       matchesCaseIdFilter(row, filters.caseIdText) &&
       matchesVerdictFilter(row, filters.finalVerdict) &&
       matchesHasErrorsFilter(row, filters.hasErrorsOnly) &&
+      matchesAmountMismatchFilter(row, filters.amountMismatchOnly) &&
       Object.entries(filters.stages).every(([fileName, stageFilter]) =>
         matchesStageFilter(row, fileName, stageFilter, settings.lowConfidenceThreshold)
       )
@@ -90,6 +98,7 @@ const DEFAULT_FILTERS: FilterState = {
   finalVerdict: 'all',
   stages: {},
   hasErrorsOnly: false,
+  amountMismatchOnly: false,
 };
 
 // Resolves a value at `path` on `raw`, coercing it to a number or null.
@@ -122,13 +131,85 @@ function rederiveRow(row: CaseRow, settings: SettingsConfig): CaseRow {
   const errorDetails: string[] = [];
 
   const finalVerdictResolved = getByPath(row.finalRaw, settings.finalVerdict.valueKeyPath);
-  const finalVerdict: number | null =
-    typeof finalVerdictResolved === 'number' ? finalVerdictResolved : null;
+  const finalVerdict: 0 | 1 | null =
+    finalVerdictResolved === 0 || finalVerdictResolved === 1 ? finalVerdictResolved : null;
   if (finalVerdictResolved === undefined) {
     errorDetails.push(
       `Could not resolve finalVerdict at path "${settings.finalVerdict.valueKeyPath}"`
     );
   }
+
+  // Re-extract amounts using updated settings
+  let extractedAmount: number | null = null;
+  let calculatedAmount: number | null = null;
+  let overallConfidence: number | null = null;
+  let knockedOffBillIssue: boolean = false;
+  let knockedOffBillCount: number = 0;
+  let billTypeMatchCounts = { vectorSearch: 0, llmSelect: 0 };
+  let tokenSummary = { totalTokensIn: null, totalTokensOut: null, overallTotalTokens: null };
+  let tokenCount: number | null = null;
+  
+  if (row.finalRaw !== null) {
+    billTypeMatchCounts = countBillTypeMatchingMethods(row.finalRaw);
+    tokenSummary = extractTokenSummary(row.finalRaw);
+
+    const extractedResolved = getByPath(row.finalRaw, settings.amounts.extractedAmountKeyPath);
+    if (extractedResolved !== undefined) {
+      extractedAmount = typeof extractedResolved === 'number' ? extractedResolved : null;
+    }
+    
+    const calculatedResolved = getByPath(row.finalRaw, settings.amounts.calculatedAmountKeyPath);
+    if (calculatedResolved !== undefined) {
+      calculatedAmount = typeof calculatedResolved === 'number' ? calculatedResolved : null;
+    }
+
+    // Re-extract overall confidence
+    const confidenceResolved = getByPath(row.finalRaw, settings.overallConfidence.keyPath);
+    if (confidenceResolved !== undefined) {
+      overallConfidence = typeof confidenceResolved === 'number' ? confidenceResolved : null;
+    }
+
+    // Re-extract token count
+    const tokenResolved = getByPath(row.finalRaw, settings.tokens.keyPath);
+    if (tokenResolved !== undefined) {
+      tokenCount = typeof tokenResolved === 'number' ? tokenResolved : null;
+    }
+
+    // Re-extract knocked_off_bill - flag as present if it has any value
+    // Also count the number of items
+    const knockedOffResolved = getByPath(row.finalRaw, settings.knockedOffBill.keyPath);
+    if (knockedOffResolved !== undefined && knockedOffResolved !== null) {
+      // If it's an array, check if it has items and count them
+      if (Array.isArray(knockedOffResolved)) {
+        knockedOffBillCount = knockedOffResolved.length;
+        knockedOffBillIssue = knockedOffResolved.length > 0;
+      } 
+      // If it's a string, check if it's not empty
+      else if (typeof knockedOffResolved === 'string') {
+        const knockedOffStr = knockedOffResolved.trim();
+        knockedOffBillIssue = knockedOffStr !== '';
+        knockedOffBillCount = knockedOffStr !== '' ? 1 : 0;
+      }
+      // If it's an object with properties, it has data
+      else if (typeof knockedOffResolved === 'object') {
+        knockedOffBillCount = Object.keys(knockedOffResolved).length;
+        knockedOffBillIssue = knockedOffBillCount > 0;
+      }
+      // Any other value (number, boolean, etc.) means it has data
+      else {
+        knockedOffBillIssue = true;
+        knockedOffBillCount = 1;
+      }
+    }
+  }
+
+  // Calculate mismatch with tolerance of 5
+  // If difference > 5, it's a mismatch (true)
+  // If difference <= 5, amounts are considered matching (false)
+  const amountMismatch = 
+    extractedAmount !== null && 
+    calculatedAmount !== null && 
+    Math.abs(extractedAmount - calculatedAmount) > 5;
 
   const stages: StageResult[] = row.stages.map((stage) => {
     const override = settings.stageOverrides[stage.fileName];
@@ -153,6 +234,15 @@ function rederiveRow(row: CaseRow, settings: SettingsConfig): CaseRow {
   return {
     ...row,
     finalVerdict,
+    overallConfidence,
+    extractedAmount,
+    calculatedAmount,
+    amountMismatch,
+    knockedOffBillIssue,
+    knockedOffBillCount,
+    billTypeMatchCounts,
+    tokenSummary,
+    tokenCount,
     stages,
     hasErrors,
     errorDetails,

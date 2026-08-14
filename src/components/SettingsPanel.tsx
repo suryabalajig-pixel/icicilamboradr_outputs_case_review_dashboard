@@ -159,6 +159,59 @@ export default function SettingsPanel() {
           </p>
         </section>
 
+        {/* Section 1.5: Amount Fields */}
+        <section className="mb-6">
+          <h3 className="mb-2 text-caption font-semibold uppercase text-textMuted">
+            Amount Fields
+          </h3>
+          <label className="mb-1 block text-caption text-textMuted">Extracted Amount Key Path</label>
+          <input
+            type="text"
+            value={draft.amounts.extractedAmountKeyPath}
+            onChange={(e) =>
+              setDraft({
+                ...draft,
+                amounts: { ...draft.amounts, extractedAmountKeyPath: e.target.value },
+              })
+            }
+            className="mb-2 w-full rounded border border-border px-2 py-1 text-body"
+          />
+          <label className="mb-1 block text-caption text-textMuted">Calculated Amount Key Path</label>
+          <input
+            type="text"
+            value={draft.amounts.calculatedAmountKeyPath}
+            onChange={(e) =>
+              setDraft({
+                ...draft,
+                amounts: { ...draft.amounts, calculatedAmountKeyPath: e.target.value },
+              })
+            }
+            className="w-full rounded border border-border px-2 py-1 text-body"
+          />
+        </section>
+
+        {/* Section 1.6: Overall Confidence */}
+        <section className="mb-6">
+          <h3 className="mb-2 text-caption font-semibold uppercase text-textMuted">
+            Overall Confidence
+          </h3>
+          <label className="mb-1 block text-caption text-textMuted">Overall Confidence Key Path</label>
+          <input
+            type="text"
+            value={draft.overallConfidence.keyPath}
+            onChange={(e) =>
+              setDraft({
+                ...draft,
+                overallConfidence: { keyPath: e.target.value },
+              })
+            }
+            className="w-full rounded border border-border px-2 py-1 text-body"
+          />
+          <p className="mt-1 text-caption text-textMuted">
+            Used to calculate "Failed by Low Confidence" metric
+          </p>
+        </section>
+
         {/* Section 2: Stage Defaults */}
         <section className="mb-6">
           <h3 className="mb-2 text-caption font-semibold uppercase text-textMuted">

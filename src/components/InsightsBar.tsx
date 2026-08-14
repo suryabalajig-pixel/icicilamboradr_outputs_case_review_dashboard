@@ -1,5 +1,5 @@
 import { useAppStore } from '../store/appStore';
-import { passRate, errorCount, stageInsights } from '../lib/insights';
+import { passRate, errorCount, stageInsights, amountMismatchCount, failedByLowConfidenceCount, knockedOffBillIssuesCount, knockedOffBillTotalLineItems, totalTokens } from '../lib/insights';
 
 function InsightCard({
   label,
@@ -48,58 +48,35 @@ export default function InsightsBar() {
 
   const perStage = stageInsights(rows, stageColumns, settings.lowConfidenceThreshold);
   const errors = errorCount(rows);
+  const mismatches = amountMismatchCount(rows);
+  const failedLowConf = failedByLowConfidenceCount(rows);
+  const knockedOffIssues = knockedOffBillIssuesCount(rows);
+  const knockedOffTotalItems = knockedOffBillTotalLineItems(rows);
+  const totalTokensCount = totalTokens(rows);
 
-  // Count cases where "consolidation.json" stage score is less than 0.9
-  const consolidationLowCount = rows.reduce((count, row) => {
-    const stage = row.stages.find((s) => s.fileName === 'consolidation.json');
-    if (stage && stage.score !== null && stage.score < 0.9) {
-      return count + 1;
-    }
-    return count;
-  }, 0);
-
-
-   const classification_LowCount = rows.reduce((count, row) => {
-    const stage = row.stages.find((s) => s.fileName === 'classification.json');
-    if (stage && stage.score !== null && stage.score < 0.9) {
-      return count + 1;
-    }
-    return count;
-  }, 0);
-
-  const bill_type_resolution_LowCount = rows.reduce((count, row) => {
-    const stage = row.stages.find((s) => s.fileName === 'bill_type_resolution.json');
-    if (stage && stage.score !== null && stage.score < 0.9) {
-      return count + 1;
-    }
-    return count;
-  }, 0);
-
-  const categorisation_LowCount = rows.reduce((count, row) => {
-    const stage = row.stages.find((s) => s.fileName === 'categorisation.json');
-    if (stage && stage.score !== null && stage.score < 0.9) {
-      return count + 1;
-    }
-    return count;
-  }, 0);
-
- 
-
-  const extraction_LowCount = rows.reduce((count, row) => {
-    const stage = row.stages.find((s) => s.fileName === 'extraction.json');
-    if (stage && stage.score !== null && stage.score < 0.9) {
-      return count + 1;
-    }
-    return count;
-  }, 0);
-
-   const sequencing_LowCount = rows.reduce((count, row) => {
-    const stage = row.stages.find((s) => s.fileName === 'sequencing.json');
-    if (stage && stage.score !== null && stage.score < 0.9) {
-      return count + 1;
-    }
-    return count;
-  }, 0);
+  // Debug logging
+  if (rows.length > 0) {
+    console.log('=== Failed by Low Confidence (Amounts Match but Failed) ===');
+    console.log('Total rows:', rows.length);
+    console.log('Failed cases (verdict=0):', rows.filter(r => r.finalVerdict === 0).length);
+    console.log('Cases with both amounts:', rows.filter(r => r.extractedAmount !== null && r.calculatedAmount !== null).length);
+    console.log('Failed despite amounts matching:', failedLowConf);
+    
+    const problematicCases = rows.filter(r => 
+      r.finalVerdict === 0 && 
+      r.extractedAmount !== null && 
+      r.calculatedAmount !== null &&
+      r.extractedAmount === r.calculatedAmount
+    ).slice(0, 5);
+    
+    console.log('Sample problematic cases:', problematicCases.map(r => ({
+      caseId: r.caseId,
+      verdict: r.finalVerdict,
+      extractedAmount: r.extractedAmount,
+      calculatedAmount: r.calculatedAmount,
+      match: r.extractedAmount === r.calculatedAmount
+    })));
+  }
 
   return (
     <div className="flex flex-col gap-3 border-b border-border bg-surface p-4">
@@ -128,6 +105,32 @@ export default function InsightsBar() {
       <div className="flex flex-wrap gap-3">
         <InsightCard label="Total Cases" value={rows.length} />
         <InsightCard label="Pass Rate" value={`${(passRate(rows) * 100).toFixed(0)}%`} />
+        <InsightCard
+          label="Failed by Low Confidence"
+          value={failedLowConf}
+          valueClassName={failedLowConf > 0 ? 'text-lowText' : ''}
+        />
+        <InsightCard
+          label="Knocked Off Bill Present"
+          value={knockedOffIssues}
+          valueClassName={knockedOffIssues > 0 ? 'text-blue-600' : ''}
+        />
+        <InsightCard
+          label="Total Line Items"
+          value={knockedOffTotalItems}
+          valueClassName={knockedOffTotalItems > 0 ? 'text-orange-600' : ''}
+        />
+        <InsightCard
+          label="Total Tokens"
+          value={totalTokensCount.toLocaleString()}
+          valueClassName={totalTokensCount > 0 ? 'text-purple-600' : ''}
+        />
+        <InsightCard
+          label="Amount Mismatches"
+          value={mismatches}
+          valueClassName={mismatches > 0 ? 'text-amber-600' : ''}
+          onClick={() => setFilter({ amountMismatchOnly: true })}
+        />
         {perStage.map((s) => (
           <InsightCard
             key={s.fileName}
@@ -140,37 +143,6 @@ export default function InsightsBar() {
           value={errors}
           valueClassName={errors > 0 ? 'text-lowText' : ''}
           onClick={() => setFilter({ hasErrorsOnly: true })}
-        />
-        <InsightCard
-          label="Consolidation < 0.9"
-          value={consolidationLowCount}
-          valueClassName={consolidationLowCount > 0 ? 'text-lowText' : ''}
-        />
-      
-        <InsightCard
-          label="bill_type_resolution < 0.9"
-          value={bill_type_resolution_LowCount}
-          valueClassName={bill_type_resolution_LowCount > 0 ? 'text-lowText' : ''}
-        />
-        <InsightCard
-          label="categorisation < 0.9"
-          value={categorisation_LowCount}
-          valueClassName={categorisation_LowCount > 0 ? 'text-lowText' : ''}
-        />
-        <InsightCard
-          label="classification < 0.9"
-          value={classification_LowCount}
-          valueClassName={classification_LowCount > 0 ? 'text-lowText' : ''}
-        />
-        <InsightCard
-          label="extraction < 0.9"
-          value={extraction_LowCount}
-          valueClassName={extraction_LowCount > 0 ? 'text-lowText' : ''}
-        />
-        <InsightCard
-          label="sequencing < 0.9"
-          value={sequencing_LowCount}
-          valueClassName={sequencing_LowCount > 0 ? 'text-lowText' : ''}
         />
       </div>
     </div>

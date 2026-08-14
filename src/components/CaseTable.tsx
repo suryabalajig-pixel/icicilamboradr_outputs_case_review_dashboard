@@ -5,7 +5,6 @@ import {
   getCoreRowModel,
   getSortedRowModel,
   useReactTable,
-  type Column,
   type SortingState,
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -22,23 +21,81 @@ function MissingDataBadge() {
   );
 }
 
-function SortButton({ column }: { column: Column<CaseRow, unknown> }) {
-  const sorted = column.getIsSorted();
+const columnHelper = createColumnHelper<CaseRow>();
+
+function AmountCell({ amount }: { amount: number | null }) {
+  if (amount === null) {
+    return <span className="text-textMuted">—</span>;
+  }
+  return <span className="font-mono">{amount.toFixed(2)}</span>;
+}
+
+function BillTypeMatchCell({
+  counts,
+}: {
+  counts: CaseRow['billTypeMatchCounts'];
+}) {
+  const total = counts.vectorSearch + counts.llmSelect;
+  if (total === 0) {
+    return <span className="text-textMuted">-</span>;
+  }
+
   return (
-    <button
-      onClick={(e) => {
-        e.stopPropagation();
-        column.toggleSorting(sorted === 'asc');
-      }}
-      className="ml-1 inline-flex items-center rounded px-1 py-0.5 text-[10px] font-medium text-textMuted hover:bg-neutralBg hover:text-textPrimary"
-      title={sorted === 'asc' ? 'Sort highest to lowest' : sorted === 'desc' ? 'Clear sort' : 'Sort lowest to highest'}
-    >
-      {sorted === 'asc' ? '↑' : sorted === 'desc' ? '↓' : '↕'}
-    </button>
+    <div className="flex flex-col gap-0.5 font-mono text-caption">
+      <span>VS: {counts.vectorSearch}</span>
+      <span>LLM: {counts.llmSelect}</span>
+    </div>
   );
 }
 
-const columnHelper = createColumnHelper<CaseRow>();
+function TokenSummaryCell({ summary }: { summary: CaseRow['tokenSummary'] }) {
+  if (
+    summary.totalTokensIn === null &&
+    summary.totalTokensOut === null &&
+    summary.overallTotalTokens === null
+  ) {
+    return <span className="text-textMuted">-</span>;
+  }
+
+  return (
+    <div className="flex flex-col gap-0.5 font-mono text-caption">
+      <span>In: {(summary.totalTokensIn ?? 0).toLocaleString()}</span>
+      <span>Out: {(summary.totalTokensOut ?? 0).toLocaleString()}</span>
+      <span>Total: {(summary.overallTotalTokens ?? 0).toLocaleString()}</span>
+    </div>
+  );
+}
+
+function MismatchBadge({ 
+  mismatch, 
+  extractedAmount, 
+  calculatedAmount 
+}: { 
+  mismatch: boolean; 
+  extractedAmount: number | null;
+  calculatedAmount: number | null;
+}) {
+  if (!mismatch) {
+    return <span className="text-xs font-mono text-textPrimary">true</span>;
+  }
+  
+  const handleClick = () => {
+    if (extractedAmount !== null && calculatedAmount !== null) {
+      const difference = Math.abs(extractedAmount - calculatedAmount);
+      alert(`Amount Difference: $${difference.toFixed(2)}\n\nExtracted: $${extractedAmount.toFixed(2)}\nCalculated: $${calculatedAmount.toFixed(2)}`);
+    }
+  };
+  
+  return (
+    <button
+      onClick={handleClick}
+      className="text-xs font-mono text-red-600 hover:text-red-800 hover:underline cursor-pointer"
+      title="Click to see amount difference"
+    >
+      false
+    </button>
+  );
+}
 
 export default function CaseTable() {
   const filteredRows = useAppStore((s) => s.filteredRows);
@@ -64,12 +121,9 @@ export default function CaseTable() {
       columnHelper.accessor('caseId', {
         id: 'caseId',
         size: 180,
-        header: ({ column }) => (
+        header: () => (
           <div className="flex flex-col gap-1">
-            <div className="flex items-center">
-              <span>Case ID</span>
-              <SortButton column={column} />
-            </div>
+            <span>Case ID</span>
             <ColumnFilterHeader columnId="caseId" />
           </div>
         ),
@@ -78,20 +132,9 @@ export default function CaseTable() {
       columnHelper.accessor('finalVerdict', {
         id: 'finalVerdict',
         size: 150,
-        sortingFn: (rowA, rowB) => {
-          const a = rowA.original.finalVerdict;
-          const b = rowB.original.finalVerdict;
-          if (a === null && b === null) return 0;
-          if (a === null) return -1;
-          if (b === null) return 1;
-          return a - b;
-        },
-        header: ({ column }) => (
+        header: () => (
           <div className="flex flex-col gap-1">
-            <div className="flex items-center">
-              <span>Final Verdict</span>
-              <SortButton column={column} />
-            </div>
+            <span>Final Verdict</span>
             <ColumnFilterHeader columnId="finalVerdict" />
           </div>
         ),
@@ -99,51 +142,102 @@ export default function CaseTable() {
           const row = info.row.original;
           return (
             <ConfidenceBadge
-              score={row.finalVerdict}
+              verdict={row.finalVerdict}
               onClick={() => openModal(row.caseId, settings.finalVerdict.file, row.finalRaw)}
             />
           );
         },
       }),
-      ...stageColumns.map((fileName) =>
-        columnHelper.accessor(
-          (row) => {
-            const stage = row.stages.find((s) => s.fileName === fileName);
-            return stage?.score ?? null;
-          },
-          {
-            id: fileName,
-            size: 150,
-            sortingFn: (rowA, rowB, columnId) => {
-              const a = rowA.getValue<number | null>(columnId);
-              const b = rowB.getValue<number | null>(columnId);
-              if (a === null && b === null) return 0;
-              if (a === null) return -1;
-              if (b === null) return 1;
-              return a - b;
-            },
-            header: ({ column }) => (
-              <div className="flex flex-col gap-1">
-                <div className="flex items-center">
-                  <span>{stageLabel(fileName)}</span>
-                  <SortButton column={column} />
-                </div>
-                <ColumnFilterHeader columnId={fileName} />
-              </div>
-            ),
-            cell: (info) => {
-              const row = info.row.original;
-              const stage = row.stages.find((s) => s.fileName === fileName);
-              if (!stage) return <MissingDataBadge />;
-              return (
-                <ConfidenceBadge
-                  score={stage.score}
-                  onClick={() => openModal(row.caseId, fileName, stage.raw)}
-                />
-              );
-            },
+      columnHelper.accessor('extractedAmount', {
+        id: 'extractedAmount',
+        size: 150,
+        header: () => <span>Extracted Amount</span>,
+        cell: (info) => <AmountCell amount={info.getValue()} />,
+      }),
+      columnHelper.accessor('calculatedAmount', {
+        id: 'calculatedAmount',
+        size: 150,
+        header: () => <span>Calculated Amount</span>,
+        cell: (info) => <AmountCell amount={info.getValue()} />,
+      }),
+      columnHelper.accessor('amountMismatch', {
+        id: 'amountMismatch',
+        size: 140,
+        header: () => (
+          <div className="flex flex-col gap-1">
+            <span>Amount Status</span>
+            <ColumnFilterHeader columnId="amountMismatch" />
+          </div>
+        ),
+        cell: (info) => {
+          const row = info.row.original;
+          return (
+            <MismatchBadge 
+              mismatch={info.getValue()} 
+              extractedAmount={row.extractedAmount}
+              calculatedAmount={row.calculatedAmount}
+            />
+          );
+        },
+      }),
+      columnHelper.accessor('knockedOffBillCount', {
+        id: 'knockedOffBillCount',
+        size: 150,
+        header: () => <span>Knocked Off Bills</span>,
+        cell: (info) => {
+          const count = info.getValue();
+          if (count === 0) {
+            return <span className="text-textMuted">—</span>;
           }
-        )
+          return <span className="font-semibold text-orange-600">{count} items</span>;
+        },
+      }),
+      columnHelper.accessor('billTypeMatchCounts', {
+        id: 'billTypeMatchCounts',
+        size: 150,
+        header: () => <span>Bill Type Match</span>,
+        cell: (info) => <BillTypeMatchCell counts={info.getValue()} />,
+        sortingFn: (a, b) => {
+          const aCounts = a.original.billTypeMatchCounts;
+          const bCounts = b.original.billTypeMatchCounts;
+          const aTotal = aCounts.vectorSearch + aCounts.llmSelect;
+          const bTotal = bCounts.vectorSearch + bCounts.llmSelect;
+          return aTotal - bTotal;
+        },
+      }),
+      columnHelper.accessor('tokenSummary', {
+        id: 'tokenSummary',
+        size: 170,
+        header: () => <span>Token Summary</span>,
+        cell: (info) => <TokenSummaryCell summary={info.getValue()} />,
+        sortingFn: (a, b) => {
+          const aTotal = a.original.tokenSummary.overallTotalTokens ?? 0;
+          const bTotal = b.original.tokenSummary.overallTotalTokens ?? 0;
+          return aTotal - bTotal;
+        },
+      }),
+      ...stageColumns.map((fileName) =>
+        columnHelper.display({
+          id: fileName,
+          size: 150,
+          header: () => (
+            <div className="flex flex-col gap-1">
+              <span>{stageLabel(fileName)}</span>
+              <ColumnFilterHeader columnId={fileName} />
+            </div>
+          ),
+          cell: (info) => {
+            const row = info.row.original;
+            const stage = row.stages.find((s) => s.fileName === fileName);
+            if (!stage) return <MissingDataBadge />;
+            return (
+              <ConfidenceBadge
+                score={stage.score}
+                onClick={() => openModal(row.caseId, fileName, stage.raw)}
+              />
+            );
+          },
+        })
       ),
     ];
     return cols;
@@ -178,6 +272,7 @@ export default function CaseTable() {
     filters.caseIdText !== '' ||
     filters.finalVerdict !== 'all' ||
     filters.hasErrorsOnly ||
+    filters.amountMismatchOnly ||
     Object.keys(filters.stages).length > 0;
 
   const renderRow = (rowIndex: number, style?: React.CSSProperties) => {
@@ -216,8 +311,9 @@ export default function CaseTable() {
                       key={header.id}
                       className={`px-3 py-2 text-left align-top text-caption font-semibold text-textMuted ${
                         isPinned ? 'sticky left-0 z-20 bg-surface' : ''
-                      }`}
+                      } ${header.column.getCanSort() ? 'cursor-pointer' : ''}`}
                       style={{ width: header.getSize() }}
+                      onClick={header.column.getToggleSortingHandler()}
                     >
                       {flexRender(header.column.columnDef.header, header.getContext())}
                     </th>
