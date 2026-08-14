@@ -30,21 +30,6 @@ export function matchesHasErrorsFilter(row: CaseRow, hasErrorsOnly: boolean): bo
   return row.hasErrors === true;
 }
 
-export function matchesAmountMismatchFilter(row: CaseRow, amountMismatchOnly: boolean): boolean {
-  if (!amountMismatchOnly) return true;
-  return row.amountMismatch === true;
-}
-
-export function matchesAmountMatchFilter(
-  row: CaseRow,
-  amountMatchFilter: FilterState['amountMatchFilter']
-): boolean {
-  if (amountMatchFilter === 'all') return true;
-  if (amountMatchFilter === 'match')    return row.amountMismatch === false;
-  if (amountMatchFilter === 'mismatch') return row.amountMismatch === true;
-  return true;
-}
-
 export function matchesStageFilter(
   row: CaseRow,
   fileName: string,
@@ -83,8 +68,6 @@ export function applyAllFilters(
       matchesCaseIdFilter(row, filters.caseIdText) &&
       matchesVerdictFilter(row, filters.finalVerdict) &&
       matchesHasErrorsFilter(row, filters.hasErrorsOnly) &&
-      matchesAmountMismatchFilter(row, filters.amountMismatchOnly) &&
-      matchesAmountMatchFilter(row, filters.amountMatchFilter) &&
       Object.entries(filters.stages).every(([fileName, stageFilter]) =>
         matchesStageFilter(row, fileName, stageFilter, settings.lowConfidenceThreshold)
       )
@@ -107,8 +90,6 @@ const DEFAULT_FILTERS: FilterState = {
   finalVerdict: 'all',
   stages: {},
   hasErrorsOnly: false,
-  amountMismatchOnly: false,
-  amountMatchFilter: 'all',
 };
 
 // Resolves a value at `path` on `raw`, coercing it to a number or null.
@@ -141,42 +122,13 @@ function rederiveRow(row: CaseRow, settings: SettingsConfig): CaseRow {
   const errorDetails: string[] = [];
 
   const finalVerdictResolved = getByPath(row.finalRaw, settings.finalVerdict.valueKeyPath);
-  const finalVerdict: 0 | 1 | null =
-    finalVerdictResolved === 0 || finalVerdictResolved === 1 ? finalVerdictResolved : null;
+  const finalVerdict: number | null =
+    typeof finalVerdictResolved === 'number' ? finalVerdictResolved : null;
   if (finalVerdictResolved === undefined) {
     errorDetails.push(
       `Could not resolve finalVerdict at path "${settings.finalVerdict.valueKeyPath}"`
     );
   }
-
-  // Re-extract amounts using updated settings
-  let extractedAmount: number | null = null;
-  let calculatedAmount: number | null = null;
-  let overallConfidence: number | null = null;
-  
-  if (row.finalRaw !== null) {
-    const extractedResolved = getByPath(row.finalRaw, settings.amounts.extractedAmountKeyPath);
-    if (extractedResolved !== undefined) {
-      extractedAmount = typeof extractedResolved === 'number' ? extractedResolved : null;
-    }
-    
-    const calculatedResolved = getByPath(row.finalRaw, settings.amounts.calculatedAmountKeyPath);
-    if (calculatedResolved !== undefined) {
-      calculatedAmount = typeof calculatedResolved === 'number' ? calculatedResolved : null;
-    }
-
-    // Re-extract overall confidence
-    const confidenceResolved = getByPath(row.finalRaw, settings.overallConfidence.keyPath);
-    if (confidenceResolved !== undefined) {
-      overallConfidence = typeof confidenceResolved === 'number' ? confidenceResolved : null;
-    }
-  }
-
-  // Calculate mismatch: differ by more than 5 (same margin as the loader).
-  const amountMismatch =
-    extractedAmount !== null &&
-    calculatedAmount !== null &&
-    Math.abs(extractedAmount - calculatedAmount) > 5;
 
   const stages: StageResult[] = row.stages.map((stage) => {
     const override = settings.stageOverrides[stage.fileName];
@@ -193,26 +145,7 @@ function rederiveRow(row: CaseRow, settings: SettingsConfig): CaseRow {
       errorDetails.push(`Could not resolve score for "${stage.fileName}" at path "${valueKeyPath}"`);
     }
 
-    // Re-derive issue counts from raw blob so they stay consistent with the
-    // loader's logic — issueCount/highSeverityCount are pure reads from
-    // raw.issues[], not settings-dependent, so re-reading keeps them correct
-    // even when rederiveRow is called after a settings change.
-    let issueCount = 0;
-    let highSeverityCount = 0;
-    if (stage.raw !== null && typeof stage.raw === 'object') {
-      const issuesRaw = (stage.raw as Record<string, unknown>)['issues'];
-      if (Array.isArray(issuesRaw)) {
-        issueCount = issuesRaw.length;
-        highSeverityCount = issuesRaw.filter(
-          (issue) =>
-            typeof issue === 'object' &&
-            issue !== null &&
-            (issue as Record<string, unknown>)['severity'] === 'high',
-        ).length;
-      }
-    }
-
-    return { ...stage, label, score, issueCount, highSeverityCount };
+    return { ...stage, label, score };
   });
 
   const hasErrors = errorDetails.length > 0;
@@ -220,20 +153,6 @@ function rederiveRow(row: CaseRow, settings: SettingsConfig): CaseRow {
   return {
     ...row,
     finalVerdict,
-    overallConfidence,
-    extractedAmount,
-    calculatedAmount,
-    amountMismatch,
-    // nonPayableAmount comes from adjudication.json which is not cached in
-    // finalRaw. rederiveRow has no filesystem access, so we preserve whatever
-    // was loaded by the loader — it never changes on a settings re-derive.
-    nonPayableAmount: row.nonPayableAmount,
-    // Judge fields also come from adjudication.json — preserve as-loaded.
-    minJudgeScore: row.minJudgeScore,
-    avgJudgeScore: row.avgJudgeScore,
-    judgeApprovedAgentCount: row.judgeApprovedAgentCount,
-    judgeFailedAgentCount: row.judgeFailedAgentCount,
-    judgeOverrideFlagCount: row.judgeOverrideFlagCount,
     stages,
     hasErrors,
     errorDetails,

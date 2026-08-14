@@ -27,16 +27,6 @@ export default function ColumnFilterHeader({ columnId }: ColumnFilterHeaderProps
     );
   }
 
-  if (columnId === 'amountMismatch') {
-    return (
-      <AmountMismatchFilter
-        value={filters.amountMismatchOnly}
-        setFilter={setFilter}
-        clearFilter={clearFilter}
-      />
-    );
-  }
-
   const stageFilter = filters.stages[columnId] ?? DEFAULT_STAGE_FILTER;
   return (
     <StageFilter
@@ -131,45 +121,6 @@ function VerdictFilter({
         <span className="inline-flex w-fit items-center gap-1 rounded-full border border-accent px-2 py-0.5 text-caption text-accent">
           {value === 1 ? 'Pass' : 'Fail'}
           <button onClick={() => clearFilter('finalVerdict')} aria-label="Clear verdict filter">
-            ×
-          </button>
-        </span>
-      )}
-    </div>
-  );
-}
-
-function AmountMismatchFilter({
-  value,
-  setFilter,
-  clearFilter,
-}: {
-  value: boolean;
-  setFilter: (u: { amountMismatchOnly: boolean }) => void;
-  clearFilter: (k: 'amountMismatchOnly') => void;
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-1">
-        <div className="flex gap-1">
-          {[false, true].map((opt) => (
-            <button
-              key={String(opt)}
-              onClick={() => setFilter({ amountMismatchOnly: opt })}
-              className={`rounded px-2 py-0.5 text-caption ${
-                value === opt ? 'bg-accent text-white' : 'bg-surface text-textMuted hover:bg-rowHover'
-              }`}
-            >
-              {opt ? 'Mismatch' : 'All'}
-            </button>
-          ))}
-        </div>
-        <Filter size={14} className={value ? 'text-accent' : 'text-textMuted'} />
-      </div>
-      {value && (
-        <span className="inline-flex w-fit items-center gap-1 rounded-full border border-accent px-2 py-0.5 text-caption text-accent">
-          Mismatch only
-          <button onClick={() => clearFilter('amountMismatchOnly')} aria-label="Clear mismatch filter">
             ×
           </button>
         </span>

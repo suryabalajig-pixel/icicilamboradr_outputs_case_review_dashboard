@@ -16,10 +16,6 @@ function makeRow(overrides: Partial<CaseRow>): CaseRow {
   return {
     caseId: 'case1',
     finalVerdict: null,
-    overallConfidence: null,
-    extractedAmount: null,
-    calculatedAmount: null,
-    amountMismatch: false,
     finalRaw: null,
     stages: [],
     hasErrors: false,

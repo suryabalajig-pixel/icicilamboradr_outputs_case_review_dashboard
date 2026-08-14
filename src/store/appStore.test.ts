@@ -17,10 +17,6 @@ function makeRow(overrides: Partial<CaseRow> = {}): CaseRow {
   return {
     caseId: 'case1',
     finalVerdict: null,
-    overallConfidence: null,
-    extractedAmount: null,
-    calculatedAmount: null,
-    amountMismatch: false,
     finalRaw: { bill_summary: { case_verdict: 1 } },
     stages: [],
     hasErrors: false,
@@ -133,7 +129,7 @@ function resetStore() {
     sidebarOpen: false,
     settingsPanelOpen: false,
     modalState: null,
-    filters: { caseIdText: '', finalVerdict: 'all', stages: {}, hasErrorsOnly: false, amountMismatchOnly: false },
+    filters: { caseIdText: '', finalVerdict: 'all', stages: {}, hasErrorsOnly: false },
     filteredRows: [],
     insightsScope: 'filtered',
   });
@@ -147,10 +143,6 @@ describe('rederiveCaseRows', () => {
       {
         caseId: 'case1',
         finalVerdict: null,
-        overallConfidence: null,
-        extractedAmount: null,
-        calculatedAmount: null,
-        amountMismatch: false,
         finalRaw: { bill_summary: { case_verdict: 1 } },
         stages: [
           { fileName: 'categorisation.json', label: '', score: null, raw: { stage: 'cat', score: 0.9 } },
@@ -177,10 +169,6 @@ describe('rederiveCaseRows', () => {
       {
         caseId: 'case1',
         finalVerdict: 1,
-        overallConfidence: null,
-        extractedAmount: null,
-        calculatedAmount: null,
-        amountMismatch: false,
         finalRaw: { bill_summary: {} }, // case_verdict missing
         stages: [
           { fileName: 'categorisation.json', label: 'x', score: 0.9, raw: {} }, // score missing too
@@ -212,10 +200,6 @@ describe('rederiveCaseRows', () => {
       {
         caseId: 'case1',
         finalVerdict: null,
-        overallConfidence: null,
-        extractedAmount: null,
-        calculatedAmount: null,
-        amountMismatch: false,
         finalRaw: { bill_summary: { case_verdict: 0 } },
         stages: [
           { fileName: 'extraction.json', label: '', score: null, raw: { stage: 'extraction', confidence: 0.55 } },
@@ -283,8 +267,6 @@ describe('setFilter / clearFilter / clearAllFilters', () => {
       finalVerdict: 'all',
       stages: {},
       hasErrorsOnly: false,
-      amountMismatchOnly: false,
-      amountMatchFilter: 'all',
     });
   });
 });
@@ -307,7 +289,6 @@ describe('updateSettings', () => {
         finalVerdict: 'all',
         stages: { 'categorisation.json': { min: null, max: null, lowConfOnly: true } },
         hasErrorsOnly: false,
-        amountMismatchOnly: false,
       },
     });
 

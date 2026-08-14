@@ -5,6 +5,7 @@ import {
   getCoreRowModel,
   getSortedRowModel,
   useReactTable,
+  type Column,
   type SortingState,
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -21,198 +22,23 @@ function MissingDataBadge() {
   );
 }
 
-const columnHelper = createColumnHelper<CaseRow>();
-
-// ─── ConfidencePill ───────────────────────────────────────────────────────────
-
-function ConfidencePill({
-  score,
-  low,
-  high,
-}: {
-  score: number | null;
-  low: number;
-  high: number;
-}) {
-  if (score === null) return <span className="text-textMuted">—</span>;
-
-  const colorClass =
-    score >= high
-      ? 'bg-green-100 text-green-800'
-      : score >= low
-        ? 'bg-amber-100 text-amber-800'
-        : 'bg-red-100 text-red-700';
-
-  return (
-    <span className={`inline-flex items-center rounded-lg px-2 py-0.5 font-mono text-caption font-semibold ${colorClass}`}>
-      {(score * 100).toFixed(1)}%
-    </span>
-  );
-}
-
-// ─── AmountsMatchCell ─────────────────────────────────────────────────────────
-// Clicking the true/false pill filters the table to that value.
-// A separate ⓘ info button opens the popover showing both amounts.
-
-function AmountsMatchCell({
-  amountMismatch,
-  extractedAmount,
-  calculatedAmount,
-  isFiltered,
-  onFilterMatch,
-  onFilterMismatch,
-  onClearFilter,
-}: {
-  amountMismatch: boolean;
-  extractedAmount: number | null;
-  calculatedAmount: number | null;
-  isFiltered: boolean;
-  onFilterMatch: () => void;
-  onFilterMismatch: () => void;
-  onClearFilter: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-
-  const match = !amountMismatch;
-
-  const fmt = (v: number | null) =>
-    v === null
-      ? '—'
-      : `₹${v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-  const handlePillClick = () => {
-    if (isFiltered) {
-      onClearFilter();
-    } else if (match) {
-      onFilterMatch();
-    } else {
-      onFilterMismatch();
-    }
-  };
-
-  return (
-    <div className="relative inline-flex items-center gap-1">
-      {/* Pill — click to filter / clear filter */}
-      <button
-        type="button"
-        onClick={handlePillClick}
-        title={isFiltered ? 'Click to clear filter' : `Click to filter by amounts_match=${match}`}
-        className={[
-          'inline-flex items-center rounded-md px-2 py-0.5 font-mono text-caption font-semibold transition-all hover:opacity-80 focus:outline-none',
-          match ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-700',
-          isFiltered ? 'ring-2 ring-accent ring-offset-1' : '',
-        ].join(' ')}
-      >
-        {match ? 'true' : 'false'}
-        {isFiltered && <span className="ml-1 text-accent">✕</span>}
-      </button>
-
-      {/* ⓘ info button — opens amount detail popover */}
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        title="View extracted & calculated amounts"
-        className="rounded px-0.5 text-[11px] text-textMuted hover:text-textPrimary focus:outline-none"
-      >
-        ⓘ
-      </button>
-
-      {/* Popover */}
-      {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-40 mt-1 min-w-[220px] rounded-lg border border-border bg-card p-3 shadow-lg">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-caption font-semibold text-textPrimary">Amount Details</span>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="text-textMuted hover:text-textPrimary"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-caption text-textMuted">Extracted</span>
-                <span className="font-mono text-caption font-semibold text-textPrimary">
-                  {fmt(extractedAmount)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-caption text-textMuted">Calculated</span>
-                <span className="font-mono text-caption font-semibold text-textPrimary">
-                  {fmt(calculatedAmount)}
-                </span>
-              </div>
-              {!match && extractedAmount !== null && calculatedAmount !== null && (
-                <div className="mt-1 flex items-center justify-between gap-4 border-t border-border pt-1">
-                  <span className="text-caption text-red-600">Difference</span>
-                  <span className="font-mono text-caption font-semibold text-red-700">
-                    {fmt(Math.abs(extractedAmount - calculatedAmount))}
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ─── StageCell ────────────────────────────────────────────────────────────────
-
-function StageCell({
-  score,
-  issueCount,
-  highSeverityCount,
-  onClick,
-}: {
-  score: number | null;
-  issueCount: number;
-  highSeverityCount: number;
-  onClick: () => void;
-}) {
+function SortButton({ column }: { column: Column<CaseRow, unknown> }) {
+  const sorted = column.getIsSorted();
   return (
     <button
-      type="button"
-      onClick={onClick}
-      className="flex items-center gap-1.5 rounded hover:opacity-80 focus:outline-none"
+      onClick={(e) => {
+        e.stopPropagation();
+        column.toggleSorting(sorted === 'asc');
+      }}
+      className="ml-1 inline-flex items-center rounded px-1 py-0.5 text-[10px] font-medium text-textMuted hover:bg-neutralBg hover:text-textPrimary"
+      title={sorted === 'asc' ? 'Sort highest to lowest' : sorted === 'desc' ? 'Clear sort' : 'Sort lowest to highest'}
     >
-      {score === null ? (
-        <span className="text-textMuted">—</span>
-      ) : (
-        <span
-          className={`inline-flex items-center rounded px-1.5 py-0.5 font-mono text-caption font-semibold ${
-            score >= 0.95
-              ? 'bg-green-100 text-green-800'
-              : score >= 0.85
-                ? 'bg-amber-100 text-amber-800'
-                : 'bg-red-100 text-red-700'
-          }`}
-        >
-          {(score * 100).toFixed(0)}%
-        </span>
-      )}
-
-      {issueCount > 0 ? (
-        <>
-          <span className="inline-flex items-center gap-0.5 rounded bg-slate-100 px-1.5 py-0.5 text-caption text-slate-600">
-            {issueCount}<span className="opacity-70">iss</span>
-          </span>
-          {highSeverityCount > 0 && (
-            <span className="inline-flex items-center gap-0.5 rounded bg-red-100 px-1.5 py-0.5 text-caption font-semibold text-red-700">
-              {highSeverityCount}<span className="font-normal opacity-80">H</span>
-            </span>
-          )}
-        </>
-      ) : (
-        score !== null && <span className="text-caption text-green-600">✓</span>
-      )}
+      {sorted === 'asc' ? '↑' : sorted === 'desc' ? '↓' : '↕'}
     </button>
   );
 }
+
+const columnHelper = createColumnHelper<CaseRow>();
 
 export default function CaseTable() {
   const filteredRows = useAppStore((s) => s.filteredRows);
@@ -220,7 +46,6 @@ export default function CaseTable() {
   const stageColumns = useAppStore((s) => s.stageColumns);
   const settings = useAppStore((s) => s.settings);
   const filters = useAppStore((s) => s.filters);
-  const setFilter = useAppStore((s) => s.setFilter);
   const openModal = useAppStore((s) => s.openModal);
   const clearAllFilters = useAppStore((s) => s.clearAllFilters);
 
@@ -236,23 +61,15 @@ export default function CaseTable() {
 
   const columns = useMemo(() => {
     const cols = [
-      // ── S.No — pinned, display-only, shows visual row position ───────
-      columnHelper.display({
-        id: 'sno',
-        size: 52,
-        header: () => <span className="text-textMuted">#</span>,
-        cell: (info) => (
-          <span className="font-mono text-caption text-textMuted">
-            {info.row.index + 1}
-          </span>
-        ),
-      }),
       columnHelper.accessor('caseId', {
         id: 'caseId',
         size: 180,
-        header: () => (
+        header: ({ column }) => (
           <div className="flex flex-col gap-1">
-            <span>Case ID</span>
+            <div className="flex items-center">
+              <span>Case ID</span>
+              <SortButton column={column} />
+            </div>
             <ColumnFilterHeader columnId="caseId" />
           </div>
         ),
@@ -261,9 +78,20 @@ export default function CaseTable() {
       columnHelper.accessor('finalVerdict', {
         id: 'finalVerdict',
         size: 150,
-        header: () => (
+        sortingFn: (rowA, rowB) => {
+          const a = rowA.original.finalVerdict;
+          const b = rowB.original.finalVerdict;
+          if (a === null && b === null) return 0;
+          if (a === null) return -1;
+          if (b === null) return 1;
+          return a - b;
+        },
+        header: ({ column }) => (
           <div className="flex flex-col gap-1">
-            <span>Final Verdict</span>
+            <div className="flex items-center">
+              <span>Final Verdict</span>
+              <SortButton column={column} />
+            </div>
             <ColumnFilterHeader columnId="finalVerdict" />
           </div>
         ),
@@ -271,124 +99,51 @@ export default function CaseTable() {
           const row = info.row.original;
           return (
             <ConfidenceBadge
-              verdict={row.finalVerdict}
+              score={row.finalVerdict}
               onClick={() => openModal(row.caseId, settings.finalVerdict.file, row.finalRaw)}
             />
           );
         },
       }),
-      columnHelper.accessor('overallConfidence', {
-        id: 'overallConfidence',
-        size: 150,
-        header: () => <span>Overall Confidence</span>,
-        cell: (info) => (
-          <ConfidencePill
-            score={info.getValue()}
-            low={settings.lowConfidenceThreshold}
-            high={settings.highConfidenceThreshold}
-          />
-        ),
-        sortingFn: (a, b) => {
-          const va = a.original.overallConfidence ?? -1;
-          const vb = b.original.overallConfidence ?? -1;
-          return va - vb;
-        },
-      }),
-      columnHelper.accessor('amountMismatch', {
-        id: 'amountMismatch',
-        size: 160,
-        header: () => (
-          <div className="flex flex-col gap-1">
-            <span>amounts_match</span>
-            <ColumnFilterHeader columnId="amountMismatch" />
-          </div>
-        ),
-        cell: (info) => {
-          const row = info.row.original;
-          const currentFilter = filters.amountMatchFilter;
-          const match = !info.getValue();
-          // This cell is "filtered" when the active filter matches its value
-          const isFiltered =
-            (match && currentFilter === 'match') ||
-            (!match && currentFilter === 'mismatch');
-          return (
-            <AmountsMatchCell
-              amountMismatch={info.getValue()}
-              extractedAmount={row.extractedAmount}
-              calculatedAmount={row.calculatedAmount}
-              isFiltered={isFiltered}
-              onFilterMatch={() =>
-                setFilter({ amountMatchFilter: 'match', amountMismatchOnly: false })
-              }
-              onFilterMismatch={() =>
-                setFilter({ amountMatchFilter: 'mismatch', amountMismatchOnly: false })
-              }
-              onClearFilter={() => setFilter({ amountMatchFilter: 'all' })}
-            />
-          );
-        },
-      }),
-      columnHelper.accessor('nonPayableAmount', {
-        id: 'nonPayableAmount',
-        size: 160,
-        header: () => (
-          <div className="flex flex-col gap-1">
-            <span>Knocked (₹)</span>
-            <span className="text-[10px] font-normal text-textMuted normal-case tracking-normal">
-              non-payable deductions
-            </span>
-          </div>
-        ),
-        cell: (info) => {
-          const val = info.getValue();
-          if (val === null) {
-            return <span className="text-textMuted">—</span>;
-          }
-          if (val === 0) {
-            return (
-              <span className="inline-flex items-center gap-1 text-caption text-green-700">
-                <span>₹0</span>
-                <span className="rounded bg-green-100 px-1.5 py-0.5 font-semibold">No knock</span>
-              </span>
-            );
-          }
-          return (
-            <span className="inline-flex items-center gap-1">
-              <span className="font-mono text-body text-red-700">
-                ₹{val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </span>
-              <span className="rounded bg-red-100 px-1.5 py-0.5 text-caption font-semibold text-red-700">
-                Knocked
-              </span>
-            </span>
-          );
-        },
-        sortingFn: (a, b) => (a.original.nonPayableAmount ?? -1) - (b.original.nonPayableAmount ?? -1),
-      }),
       ...stageColumns.map((fileName) =>
-        columnHelper.display({
-          id: fileName,
-          size: 180,
-          header: () => (
-            <div className="flex flex-col gap-1">
-              <span>{stageLabel(fileName)}</span>
-              <ColumnFilterHeader columnId={fileName} />
-            </div>
-          ),
-          cell: (info) => {
-            const row = info.row.original;
+        columnHelper.accessor(
+          (row) => {
             const stage = row.stages.find((s) => s.fileName === fileName);
-            if (!stage) return <MissingDataBadge />;
-            return (
-              <StageCell
-                score={stage.score}
-                issueCount={stage.issueCount}
-                highSeverityCount={stage.highSeverityCount}
-                onClick={() => openModal(row.caseId, fileName, stage.raw)}
-              />
-            );
+            return stage?.score ?? null;
           },
-        })
+          {
+            id: fileName,
+            size: 150,
+            sortingFn: (rowA, rowB, columnId) => {
+              const a = rowA.getValue<number | null>(columnId);
+              const b = rowB.getValue<number | null>(columnId);
+              if (a === null && b === null) return 0;
+              if (a === null) return -1;
+              if (b === null) return 1;
+              return a - b;
+            },
+            header: ({ column }) => (
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center">
+                  <span>{stageLabel(fileName)}</span>
+                  <SortButton column={column} />
+                </div>
+                <ColumnFilterHeader columnId={fileName} />
+              </div>
+            ),
+            cell: (info) => {
+              const row = info.row.original;
+              const stage = row.stages.find((s) => s.fileName === fileName);
+              if (!stage) return <MissingDataBadge />;
+              return (
+                <ConfidenceBadge
+                  score={stage.score}
+                  onClick={() => openModal(row.caseId, fileName, stage.raw)}
+                />
+              );
+            },
+          }
+        )
       ),
     ];
     return cols;
@@ -400,7 +155,7 @@ export default function CaseTable() {
     columns,
     state: {
       sorting,
-      columnPinning: { left: ['sno', 'caseId'] },
+      columnPinning: { left: ['caseId'] },
     },
     onSortingChange: setSorting,
     getCoreRowModel: getCoreRowModel(),
@@ -423,8 +178,6 @@ export default function CaseTable() {
     filters.caseIdText !== '' ||
     filters.finalVerdict !== 'all' ||
     filters.hasErrorsOnly ||
-    filters.amountMismatchOnly ||
-    filters.amountMatchFilter !== 'all' ||
     Object.keys(filters.stages).length > 0;
 
   const renderRow = (rowIndex: number, style?: React.CSSProperties) => {
@@ -432,13 +185,13 @@ export default function CaseTable() {
     return (
       <tr key={row.id} className="h-11 hover:bg-rowHover" style={style}>
         {row.getVisibleCells().map((cell) => {
-          const isPinned = cell.column.id === 'caseId' || cell.column.id === 'sno';
+          const isPinned = cell.column.id === 'caseId';
           return (
             <td
               key={cell.id}
               className={`px-3 text-body text-textPrimary ${
-                isPinned ? 'sticky z-10 bg-card' : ''
-              } ${cell.column.id === 'sno' ? 'left-0' : ''} ${cell.column.id === 'caseId' ? 'left-[52px]' : ''}`}
+                isPinned ? 'sticky left-0 z-10 bg-card' : ''
+              }`}
               style={{ width: cell.column.getSize() }}
             >
               {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -457,15 +210,14 @@ export default function CaseTable() {
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>
                 {headerGroup.headers.map((header) => {
-                  const isPinned = header.column.id === 'caseId' || header.column.id === 'sno';
+                  const isPinned = header.column.id === 'caseId';
                   return (
                     <th
                       key={header.id}
                       className={`px-3 py-2 text-left align-top text-caption font-semibold text-textMuted ${
-                        isPinned ? 'sticky z-20 bg-surface' : ''
-                      } ${header.column.id === 'sno' ? 'left-0' : ''} ${header.column.id === 'caseId' ? 'left-[52px]' : ''} ${header.column.getCanSort() ? 'cursor-pointer' : ''}`}
+                        isPinned ? 'sticky left-0 z-20 bg-surface' : ''
+                      }`}
                       style={{ width: header.getSize() }}
-                      onClick={header.column.getToggleSortingHandler()}
                     >
                       {flexRender(header.column.columnDef.header, header.getContext())}
                     </th>
