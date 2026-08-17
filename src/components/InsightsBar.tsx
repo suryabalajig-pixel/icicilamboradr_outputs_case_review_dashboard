@@ -116,7 +116,6 @@ export default function InsightsBar() {
   const setFilter        = useAppStore((s) => s.setFilter);
   const clearAllFilters  = useAppStore((s) => s.clearAllFilters);
 
-  const rows      = insightsScope === 'all' ? allCaseRows : filteredRows;
   // Always compute metrics against allCaseRows so card values don't collapse
   // to zero when a filter is active (e.g. clicking "Passed" should show 52,
   // not re-filter to 52 and then show 52-within-52).

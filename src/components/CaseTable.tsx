@@ -161,6 +161,42 @@ function AmountsMatchCell({
   );
 }
 
+// ─── BillTypeMatchCell ────────────────────────────────────────────────────────
+
+function BillTypeMatchCell({ counts }: { counts: CaseRow['billTypeMatchCounts'] }) {
+  const total = counts.vectorSearch + counts.llmSelect;
+  if (total === 0) {
+    return <span className="text-textMuted">-</span>;
+  }
+
+  return (
+    <div className="flex flex-col gap-0.5 font-mono text-caption">
+      <span>VS: {counts.vectorSearch}</span>
+      <span>LLM: {counts.llmSelect}</span>
+    </div>
+  );
+}
+
+// ─── TokenSummaryCell ─────────────────────────────────────────────────────────
+
+function TokenSummaryCell({ summary }: { summary: CaseRow['tokenSummary'] }) {
+  if (
+    summary.totalTokensIn === null &&
+    summary.totalTokensOut === null &&
+    summary.overallTotalTokens === null
+  ) {
+    return <span className="text-textMuted">-</span>;
+  }
+
+  return (
+    <div className="flex flex-col gap-0.5 font-mono text-caption">
+      <span>In: {(summary.totalTokensIn ?? 0).toLocaleString()}</span>
+      <span>Out: {(summary.totalTokensOut ?? 0).toLocaleString()}</span>
+      <span>Total: {(summary.overallTotalTokens ?? 0).toLocaleString()}</span>
+    </div>
+  );
+}
+
 // ─── StageCell ────────────────────────────────────────────────────────────────
 
 function StageCell({
@@ -364,6 +400,32 @@ export default function CaseTable() {
           );
         },
         sortingFn: (a, b) => (a.original.nonPayableAmount ?? -1) - (b.original.nonPayableAmount ?? -1),
+      }),
+      columnHelper.accessor('billTypeMatchCounts', {
+        id: 'billTypeMatchCounts',
+        size: 150,
+        header: () => <span>Bill Type Match</span>,
+        cell: (info) => <BillTypeMatchCell counts={info.getValue()} />,
+        sortingFn: (a, b) => {
+          const aCounts = a.original.billTypeMatchCounts;
+          const bCounts = b.original.billTypeMatchCounts;
+          return (
+            aCounts.vectorSearch +
+            aCounts.llmSelect -
+            (bCounts.vectorSearch + bCounts.llmSelect)
+          );
+        },
+      }),
+      columnHelper.accessor('tokenSummary', {
+        id: 'tokenSummary',
+        size: 170,
+        header: () => <span>Token Summary</span>,
+        cell: (info) => <TokenSummaryCell summary={info.getValue()} />,
+        sortingFn: (a, b) => {
+          const aTotal = a.original.tokenSummary.overallTotalTokens ?? 0;
+          const bTotal = b.original.tokenSummary.overallTotalTokens ?? 0;
+          return aTotal - bTotal;
+        },
       }),
       ...stageColumns.map((fileName) =>
         columnHelper.display({

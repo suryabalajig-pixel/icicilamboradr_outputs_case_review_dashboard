@@ -9,7 +9,7 @@ import {
 import type { CaseRow, StageResult } from './types';
 
 function makeStage(fileName: string, score: number | null): StageResult {
-  return { fileName, label: fileName, score, raw: null };
+  return { fileName, label: fileName, score, issueCount: 0, highSeverityCount: 0, raw: null };
 }
 
 function makeRow(overrides: Partial<CaseRow>): CaseRow {
@@ -20,6 +20,14 @@ function makeRow(overrides: Partial<CaseRow>): CaseRow {
     extractedAmount: null,
     calculatedAmount: null,
     amountMismatch: false,
+    nonPayableAmount: null,
+    minJudgeScore: null,
+    avgJudgeScore: null,
+    judgeApprovedAgentCount: null,
+    judgeFailedAgentCount: null,
+    judgeOverrideFlagCount: null,
+    billTypeMatchCounts: { vectorSearch: 0, llmSelect: 0 },
+    tokenSummary: { totalTokensIn: null, totalTokensOut: null, overallTotalTokens: null },
     finalRaw: null,
     stages: [],
     hasErrors: false,

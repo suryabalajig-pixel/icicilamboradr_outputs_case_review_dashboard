@@ -10,7 +10,7 @@ import { DEFAULT_SETTINGS } from '../lib/types';
 import type { CaseRow, SettingsConfig, StageResult } from '../lib/types';
 
 function makeStage(fileName: string, score: number | null, raw: unknown = null): StageResult {
-  return { fileName, label: fileName, score, raw: raw ?? { score } };
+  return { fileName, label: fileName, score, issueCount: 0, highSeverityCount: 0, raw: raw ?? { score } };
 }
 
 function makeRow(overrides: Partial<CaseRow> = {}): CaseRow {
@@ -21,6 +21,14 @@ function makeRow(overrides: Partial<CaseRow> = {}): CaseRow {
     extractedAmount: null,
     calculatedAmount: null,
     amountMismatch: false,
+    nonPayableAmount: null,
+    minJudgeScore: null,
+    avgJudgeScore: null,
+    judgeApprovedAgentCount: null,
+    judgeFailedAgentCount: null,
+    judgeOverrideFlagCount: null,
+    billTypeMatchCounts: { vectorSearch: 0, llmSelect: 0 },
+    tokenSummary: { totalTokensIn: null, totalTokensOut: null, overallTotalTokens: null },
     finalRaw: { bill_summary: { case_verdict: 1 } },
     stages: [],
     hasErrors: false,
@@ -133,7 +141,7 @@ function resetStore() {
     sidebarOpen: false,
     settingsPanelOpen: false,
     modalState: null,
-    filters: { caseIdText: '', finalVerdict: 'all', stages: {}, hasErrorsOnly: false, amountMismatchOnly: false },
+    filters: { caseIdText: '', finalVerdict: 'all', stages: {}, hasErrorsOnly: false, amountMismatchOnly: false, amountMatchFilter: 'all' },
     filteredRows: [],
     insightsScope: 'filtered',
   });
@@ -151,9 +159,17 @@ describe('rederiveCaseRows', () => {
         extractedAmount: null,
         calculatedAmount: null,
         amountMismatch: false,
+        nonPayableAmount: null,
+        minJudgeScore: null,
+        avgJudgeScore: null,
+        judgeApprovedAgentCount: null,
+        judgeFailedAgentCount: null,
+        judgeOverrideFlagCount: null,
+        billTypeMatchCounts: { vectorSearch: 0, llmSelect: 0 },
+        tokenSummary: { totalTokensIn: null, totalTokensOut: null, overallTotalTokens: null },
         finalRaw: { bill_summary: { case_verdict: 1 } },
         stages: [
-          { fileName: 'categorisation.json', label: '', score: null, raw: { stage: 'cat', score: 0.9 } },
+          { fileName: 'categorisation.json', label: '', score: null, issueCount: 0, highSeverityCount: 0, raw: { stage: 'cat', score: 0.9 } },
         ],
         hasErrors: true,
         errorDetails: ['stale'],
@@ -181,9 +197,17 @@ describe('rederiveCaseRows', () => {
         extractedAmount: null,
         calculatedAmount: null,
         amountMismatch: false,
+        nonPayableAmount: null,
+        minJudgeScore: null,
+        avgJudgeScore: null,
+        judgeApprovedAgentCount: null,
+        judgeFailedAgentCount: null,
+        judgeOverrideFlagCount: null,
+        billTypeMatchCounts: { vectorSearch: 0, llmSelect: 0 },
+        tokenSummary: { totalTokensIn: null, totalTokensOut: null, overallTotalTokens: null },
         finalRaw: { bill_summary: {} }, // case_verdict missing
         stages: [
-          { fileName: 'categorisation.json', label: 'x', score: 0.9, raw: {} }, // score missing too
+          { fileName: 'categorisation.json', label: 'x', score: 0.9, issueCount: 0, highSeverityCount: 0, raw: {} }, // score missing too
         ],
         hasErrors: false,
         errorDetails: [],
@@ -216,9 +240,17 @@ describe('rederiveCaseRows', () => {
         extractedAmount: null,
         calculatedAmount: null,
         amountMismatch: false,
+        nonPayableAmount: null,
+        minJudgeScore: null,
+        avgJudgeScore: null,
+        judgeApprovedAgentCount: null,
+        judgeFailedAgentCount: null,
+        judgeOverrideFlagCount: null,
+        billTypeMatchCounts: { vectorSearch: 0, llmSelect: 0 },
+        tokenSummary: { totalTokensIn: null, totalTokensOut: null, overallTotalTokens: null },
         finalRaw: { bill_summary: { case_verdict: 0 } },
         stages: [
-          { fileName: 'extraction.json', label: '', score: null, raw: { stage: 'extraction', confidence: 0.55 } },
+          { fileName: 'extraction.json', label: '', score: null, issueCount: 0, highSeverityCount: 0, raw: { stage: 'extraction', confidence: 0.55 } },
         ],
         hasErrors: false,
         errorDetails: [],
@@ -308,6 +340,7 @@ describe('updateSettings', () => {
         stages: { 'categorisation.json': { min: null, max: null, lowConfOnly: true } },
         hasErrorsOnly: false,
         amountMismatchOnly: false,
+        amountMatchFilter: 'all',
       },
     });
 

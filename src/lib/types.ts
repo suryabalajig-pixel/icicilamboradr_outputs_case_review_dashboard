@@ -34,6 +34,19 @@ export interface StageResult {
   raw: unknown;               // full parsed JSON blob for the modal
 }
 
+// Bill-type match counts broken down by matching method
+export interface BillTypeMatchCounts {
+  vectorSearch: number;  // count of bill_type matches made via vector search
+  llmSelect: number;     // count of bill_type matches made via LLM selection
+}
+
+// Token usage summary pulled from stage_confidence (in/out + overall total)
+export interface TokenSummary {
+  totalTokensIn: number | null;
+  totalTokensOut: number | null;
+  overallTotalTokens: number | null;
+}
+
 // One row in the case table — one case folder
 export interface CaseRow {
   caseId: string;              // folder name
@@ -58,6 +71,8 @@ export interface CaseRow {
   //   +1 per agent with judge.score < 0.70 (very low confidence)
   // null when adjudication.json is absent.
   judgeOverrideFlagCount: number | null;
+  billTypeMatchCounts: BillTypeMatchCounts; // bill_type matches by method (from finalRaw)
+  tokenSummary: TokenSummary;              // token usage in/out + overall (from finalRaw)
   finalRaw: unknown;           // full consolidated_final.json blob
   stages: StageResult[];       // one entry per non-excluded stage file
   hasErrors: boolean;          // true if any file is missing, unparsable, or key absent

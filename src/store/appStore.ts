@@ -1,11 +1,15 @@
 import { create } from 'zustand';
 import { getByPath } from '../lib/jsonPath';
+import { countBillTypeMatchingMethods } from '../lib/billTypeMatching';
+import { extractTokenSummary } from '../lib/tokenSummary';
 import type {
   AppStore,
+  BillTypeMatchCounts,
   CaseRow,
   FilterState,
   SettingsConfig,
   StageResult,
+  TokenSummary,
 } from '../lib/types';
 import { DEFAULT_SETTINGS } from '../lib/types';
 import { loadCaseRows } from '../hooks/useDirectoryLoader';
@@ -153,8 +157,17 @@ function rederiveRow(row: CaseRow, settings: SettingsConfig): CaseRow {
   let extractedAmount: number | null = null;
   let calculatedAmount: number | null = null;
   let overallConfidence: number | null = null;
+  let billTypeMatchCounts: BillTypeMatchCounts = { vectorSearch: 0, llmSelect: 0 };
+  let tokenSummary: TokenSummary = {
+    totalTokensIn: null,
+    totalTokensOut: null,
+    overallTotalTokens: null,
+  };
   
   if (row.finalRaw !== null) {
+    billTypeMatchCounts = countBillTypeMatchingMethods(row.finalRaw);
+    tokenSummary = extractTokenSummary(row.finalRaw);
+
     const extractedResolved = getByPath(row.finalRaw, settings.amounts.extractedAmountKeyPath);
     if (extractedResolved !== undefined) {
       extractedAmount = typeof extractedResolved === 'number' ? extractedResolved : null;
@@ -234,6 +247,8 @@ function rederiveRow(row: CaseRow, settings: SettingsConfig): CaseRow {
     judgeApprovedAgentCount: row.judgeApprovedAgentCount,
     judgeFailedAgentCount: row.judgeFailedAgentCount,
     judgeOverrideFlagCount: row.judgeOverrideFlagCount,
+    billTypeMatchCounts,
+    tokenSummary,
     stages,
     hasErrors,
     errorDetails,

@@ -1,6 +1,8 @@
 import { listJsonFiles, listSubdirectories, readJsonFile } from '../lib/fsWalk';
 import { getByPath } from '../lib/jsonPath';
-import type { CaseRow, SettingsConfig, StageResult } from '../lib/types';
+import { countBillTypeMatchingMethods } from '../lib/billTypeMatching';
+import { extractTokenSummary } from '../lib/tokenSummary';
+import type { BillTypeMatchCounts, CaseRow, SettingsConfig, StageResult, TokenSummary } from '../lib/types';
 // Number of case folders processed concurrently per batch. Matches the
 // design doc's performance section: batched (not one giant Promise.all over
 // everything, and not fully serial).
@@ -146,8 +148,17 @@ async function parseCaseFolder(
   let extractedAmount: number | null = null;
   let calculatedAmount: number | null = null;
   let overallConfidence: number | null = null;
+  let billTypeMatchCounts: BillTypeMatchCounts = { vectorSearch: 0, llmSelect: 0 };
+  let tokenSummary: TokenSummary = {
+    totalTokensIn: null,
+    totalTokensOut: null,
+    overallTotalTokens: null,
+  };
   
   if (finalFileReadOk && finalRaw !== null) {
+    billTypeMatchCounts = countBillTypeMatchingMethods(finalRaw);
+    tokenSummary = extractTokenSummary(finalRaw);
+
     const extractedResolved = getByPath(finalRaw, settings.amounts.extractedAmountKeyPath);
     if (extractedResolved !== undefined) {
       extractedAmount = typeof extractedResolved === 'number' ? extractedResolved : null;
@@ -272,6 +283,8 @@ async function parseCaseFolder(
     judgeApprovedAgentCount,
     judgeFailedAgentCount,
     judgeOverrideFlagCount,
+    billTypeMatchCounts,
+    tokenSummary,
     finalRaw,
     stages,
     hasErrors: errorDetails.length > 0,
@@ -313,6 +326,8 @@ export async function loadCaseRows(
             judgeApprovedAgentCount: null,
             judgeFailedAgentCount: null,
             judgeOverrideFlagCount: null,
+            billTypeMatchCounts: { vectorSearch: 0, llmSelect: 0 },
+            tokenSummary: { totalTokensIn: null, totalTokensOut: null, overallTotalTokens: null },
             finalRaw: null,
             stages: [],
             hasErrors: true,
