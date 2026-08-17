@@ -56,9 +56,17 @@ export interface CaseRow {
   calculatedAmount: number | null; // calculated/approved amount
   amountMismatch: boolean;     // true if extractedAmount !== calculatedAmount (both must be non-null)
   // Knocked = charges that were disallowed/deducted by the financial agent.
-  // Sourced from adjudication.json → agents[financial].report.totals.non_payable_total.
+  // Sourced from adjudication.json → agents[financial].report.totals.
   // null when adjudication.json is absent or the financial agent did not run.
-  nonPayableAmount: number | null;
+  nonPayableAmount: number | null; // total ₹ value of knocked line items (non_payable_total)
+  nonPayableCount: number | null;  // number of knocked line items (non_payable_count)
+  // Human-readable reason(s) why a failed case (finalVerdict === 0) failed,
+  // mirroring the main pipeline's _case_verdict. Built ONLY from
+  // consolidated_final.json fields: amounts_match ("Amount mismatch"/"No printed
+  // total"), overall_confidence < threshold ("Low confidence"), and
+  // knocked_off_bills non-empty ("Knocked-off bills"). Adjudication agent
+  // statuses do NOT affect the verdict. null for non-failed cases.
+  failCause: string | null;
   // Judge quality fields — sourced from adjudication.json → agents[*].judge
   // null when adjudication.json is absent.
   minJudgeScore: number | null;           // lowest judge.score across all agents

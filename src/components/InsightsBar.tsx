@@ -296,7 +296,6 @@ export default function InsightsBar() {
           <InsightCard
             label="Total With Knocked"
             value={totalWithKnocked}
-            sub="non-payable > 0"
             variant={totalWithKnocked > 0 ? 'warn' : 'muted'}
           />
           <InsightCard

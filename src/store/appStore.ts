@@ -237,10 +237,13 @@ function rederiveRow(row: CaseRow, settings: SettingsConfig): CaseRow {
     extractedAmount,
     calculatedAmount,
     amountMismatch,
-    // nonPayableAmount comes from adjudication.json which is not cached in
-    // finalRaw. rederiveRow has no filesystem access, so we preserve whatever
-    // was loaded by the loader — it never changes on a settings re-derive.
+    // nonPayableAmount/nonPayableCount come from adjudication.json which is not
+    // cached in finalRaw. rederiveRow has no filesystem access, so we preserve
+    // whatever was loaded by the loader — they never change on a settings re-derive.
     nonPayableAmount: row.nonPayableAmount,
+    nonPayableCount: row.nonPayableCount,
+    // failCause is also derived from adjudication.json — preserve as-loaded.
+    failCause: row.failCause,
     // Judge fields also come from adjudication.json — preserve as-loaded.
     minJudgeScore: row.minJudgeScore,
     avgJudgeScore: row.avgJudgeScore,

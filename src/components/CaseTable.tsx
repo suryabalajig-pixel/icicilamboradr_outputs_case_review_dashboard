@@ -313,6 +313,29 @@ export default function CaseTable() {
           );
         },
       }),
+      columnHelper.accessor('failCause', {
+        id: 'failCause',
+        size: 220,
+        header: () => <span>Possible Fail Cause</span>,
+        cell: (info) => {
+          const val = info.getValue();
+          if (val === null || val === '') {
+            return <span className="text-textMuted">—</span>;
+          }
+          return (
+            <span className="inline-flex items-center gap-1">
+              <span className="rounded bg-red-100 px-1.5 py-0.5 text-caption font-medium text-red-700">
+                {val}
+              </span>
+            </span>
+          );
+        },
+        sortingFn: (a, b) => {
+          const va = a.original.failCause ?? '';
+          const vb = b.original.failCause ?? '';
+          return va.localeCompare(vb);
+        },
+      }),
       columnHelper.accessor('overallConfidence', {
         id: 'overallConfidence',
         size: 150,
@@ -364,15 +387,12 @@ export default function CaseTable() {
           );
         },
       }),
-      columnHelper.accessor('nonPayableAmount', {
-        id: 'nonPayableAmount',
+      columnHelper.accessor('nonPayableCount', {
+        id: 'nonPayableCount',
         size: 160,
         header: () => (
           <div className="flex flex-col gap-1">
-            <span>Knocked (₹)</span>
-            <span className="text-[10px] font-normal text-textMuted normal-case tracking-normal">
-              non-payable deductions
-            </span>
+            <span>Knocked Line Items</span>
           </div>
         ),
         cell: (info) => {
@@ -383,23 +403,21 @@ export default function CaseTable() {
           if (val === 0) {
             return (
               <span className="inline-flex items-center gap-1 text-caption text-green-700">
-                <span>₹0</span>
+                <span>0</span>
                 <span className="rounded bg-green-100 px-1.5 py-0.5 font-semibold">No knock</span>
               </span>
             );
           }
           return (
             <span className="inline-flex items-center gap-1">
-              <span className="font-mono text-body text-red-700">
-                ₹{val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </span>
+              <span className="font-mono text-body font-semibold text-red-700">{val}</span>
               <span className="rounded bg-red-100 px-1.5 py-0.5 text-caption font-semibold text-red-700">
                 Knocked
               </span>
             </span>
           );
         },
-        sortingFn: (a, b) => (a.original.nonPayableAmount ?? -1) - (b.original.nonPayableAmount ?? -1),
+        sortingFn: (a, b) => (a.original.nonPayableCount ?? -1) - (b.original.nonPayableCount ?? -1),
       }),
       columnHelper.accessor('billTypeMatchCounts', {
         id: 'billTypeMatchCounts',

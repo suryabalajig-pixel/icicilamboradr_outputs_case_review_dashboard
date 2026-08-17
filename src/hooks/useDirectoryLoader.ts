@@ -9,8 +9,7 @@ import type { BillTypeMatchCounts, CaseRow, SettingsConfig, StageResult, TokenSu
 const BATCH_SIZE = 10;
 
 // Resolves the finalVerdict for a single case folder from its parsed
-// consolidated_final.json blob (or null if that file was missing/unparsable).
-// Matches appStore.ts's rederiveRow EXACTLY: `failed` (and thus hasErrors) is
+// consolidated_final.json blob (or null if that file was missing/unparsable).// Matches appStore.ts's rederiveRow EXACTLY: `failed` (and thus hasErrors) is
 // only true when getByPath itself returns undefined (path didn't resolve at
 // all). A resolved-but-not-0/1 value is coerced to null WITHOUT being
 // flagged as an error — Property 16 requires this loader and rederiveRow to
@@ -103,6 +102,75 @@ async function parseStageFile(
   return { fileName, label, score, issueCount, highSeverityCount, raw };
 }
 
+// Derives the human-readable fail cause for a failed case (finalVerdict === 0).
+// Mirrors the main pipeline's _case_verdict (consolidate.py): the verdict is 0
+// whenever amounts_match is false (or no printed total exists) or overall
+// confidence is below the threshold (pipeline hardcodes 0.9). Knocked-off
+// bills are NOT an automatic fail cause — they only count when the
+// consolidation stage judge raised a high-severity issue about them (i.e. the
+// knock-offs were incorrect). NO other signal — adjudication agent statuses,
+// document checker, etc. — affects the verdict, so the fail cause is built
+// ONLY from consolidated_final.json fields plus the consolidation judge.
+// Returns null for non-failed cases.
+function buildFailCause(
+  finalVerdict: 0 | 1 | null,
+  finalRaw: unknown,
+  overallConfidence: number | null,
+  lowConfidenceThreshold: number,
+  stages: StageResult[]
+): string | null {
+  if (finalVerdict !== 0) return null;
+
+  const causes: string[] = [];
+
+  if (finalRaw !== null && typeof finalRaw === 'object') {
+    // 1) amounts_match — reconciled extracted vs calculated within tolerance.
+    //    Absent (no printed gross total) means the pipeline treats it as not
+    //    matched and flags the case.
+    const amountsMatchResolved = getByPath(finalRaw, 'bill_summary.amounts_match');
+    if (amountsMatchResolved === false) {
+      causes.push('Amount mismatch');
+    } else if (amountsMatchResolved === undefined) {
+      causes.push('No printed total');
+    }
+
+    // 2) overall_confidence < threshold (pipeline: < 0.9)
+    if (overallConfidence !== null && overallConfidence < lowConfidenceThreshold) {
+      causes.push('Low confidence');
+    }
+  }
+
+  // 3) Incorrect knocked-off bills — only when the consolidation stage judge
+  //    raised a high-severity issue about them. Merely having knocked_off_bills
+  //    is NOT a cause; correct knock-offs (e.g. absorbed into the final bill)
+  //    are benign.
+  const consolidationStage = stages.find((stage) => stage.fileName === 'consolidation.json');
+  if (consolidationStage !== undefined && hasHighSeverityKnockOffIssue(consolidationStage.raw)) {
+    causes.push('Knocked-off bills');
+  }
+
+  if (causes.length === 0) causes.push('Unknown');
+
+  return causes.join(', ');
+}
+
+// True when the consolidation judge's raw blob contains a high-severity issue
+// whose location/problem text mentions knock-offs. This is the pipeline's
+// signal that knocked-off bills were INCORRECT (e.g. their amount is not
+// represented in the final bill) as opposed to benign knock-offs.
+function hasHighSeverityKnockOffIssue(raw: unknown): boolean {
+  if (raw === null || typeof raw !== 'object') return false;
+  const issues = (raw as Record<string, unknown>)['issues'];
+  if (!Array.isArray(issues)) return false;
+  return issues.some((issue) => {
+    if (typeof issue !== 'object' || issue === null) return false;
+    const map = issue as Record<string, unknown>;
+    if (map['severity'] !== 'high') return false;
+    const text = `${String(map['location'] ?? '')} ${String(map['problem'] ?? '')}`;
+    return /knock/i.test(text);
+  });
+}
+
 // Parses one case folder into a CaseRow. Absorbs ALL internal errors — never
 // throws — so a single bad case folder can never reject the whole batch.
 async function parseCaseFolder(
@@ -188,6 +256,7 @@ async function parseCaseFolder(
   //                        → all agents     → judge scores / statuses ----
   // Both data points come from adjudication.json so we read it once here.
   let nonPayableAmount: number | null = null;
+  let nonPayableCount: number | null = null;
   let minJudgeScore: number | null = null;
   let avgJudgeScore: number | null = null;
   let judgeApprovedAgentCount: number | null = null;
@@ -214,6 +283,10 @@ async function parseCaseFolder(
         const nonPayResolved = getByPath(finAgent, 'report.totals.non_payable_total');
         if (typeof nonPayResolved === 'number') {
           nonPayableAmount = nonPayResolved;
+        }
+        const nonPayCountResolved = getByPath(finAgent, 'report.totals.non_payable_count');
+        if (typeof nonPayCountResolved === 'number') {
+          nonPayableCount = nonPayCountResolved;
         }
       }
 
@@ -270,6 +343,14 @@ async function parseCaseFolder(
     }
   }
 
+  const failCause = buildFailCause(
+    finalVerdict,
+    finalRaw,
+    overallConfidence,
+    settings.lowConfidenceThreshold,
+    stages,
+  );
+
   return {
     caseId,
     finalVerdict,
@@ -278,6 +359,8 @@ async function parseCaseFolder(
     calculatedAmount,
     amountMismatch,
     nonPayableAmount,
+    nonPayableCount,
+    failCause,
     minJudgeScore,
     avgJudgeScore,
     judgeApprovedAgentCount,
@@ -321,6 +404,8 @@ export async function loadCaseRows(
             calculatedAmount: null,
             amountMismatch: false,
             nonPayableAmount: null,
+            nonPayableCount: null,
+            failCause: null,
             minJudgeScore: null,
             avgJudgeScore: null,
             judgeApprovedAgentCount: null,
