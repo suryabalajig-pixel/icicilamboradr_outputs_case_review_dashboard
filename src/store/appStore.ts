@@ -50,6 +50,16 @@ export function matchesAmountMatchFilter(
   return true;
 }
 
+export function matchesNotWorkingFilter(
+  row: CaseRow,
+  hideNotWorking: boolean,
+  notWorkingOnly: boolean
+): boolean {
+  if (notWorkingOnly) return row.isNotWorking === true;   // show ONLY not-working
+  if (hideNotWorking) return row.isNotWorking === false;  // hide not-working (default)
+  return true;                                            // show all
+}
+
 export function matchesStageFilter(
   row: CaseRow,
   fileName: string,
@@ -90,6 +100,7 @@ export function applyAllFilters(
       matchesHasErrorsFilter(row, filters.hasErrorsOnly) &&
       matchesAmountMismatchFilter(row, filters.amountMismatchOnly) &&
       matchesAmountMatchFilter(row, filters.amountMatchFilter) &&
+      matchesNotWorkingFilter(row, filters.hideNotWorking, filters.notWorkingOnly) &&
       Object.entries(filters.stages).every(([fileName, stageFilter]) =>
         matchesStageFilter(row, fileName, stageFilter, settings.lowConfidenceThreshold)
       )
@@ -114,6 +125,8 @@ const DEFAULT_FILTERS: FilterState = {
   hasErrorsOnly: false,
   amountMismatchOnly: false,
   amountMatchFilter: 'all',
+  hideNotWorking: true,    // hide not-working cases by default
+  notWorkingOnly: false,   // not in "show only not-working" mode by default
 };
 
 // Resolves a value at `path` on `raw`, coercing it to a number or null.
@@ -233,6 +246,16 @@ function rederiveRow(row: CaseRow, settings: SettingsConfig): CaseRow {
 
   const hasErrors = errorDetails.length > 0;
 
+  // Re-detect isNotWorking from the re-derived stages and amounts.
+  const extractionStage = stages.find((s) => s.fileName === 'extraction.json');
+  const billTypeStage   = stages.find((s) => s.fileName === 'bill_type_resolution.json');
+  const isNotWorking =
+    finalVerdict === null ||
+    calculatedAmount === null ||
+    calculatedAmount === 0 ||
+    extractionStage === undefined ||
+    billTypeStage === undefined;
+
   return {
     ...row,
     finalVerdict,
@@ -240,15 +263,10 @@ function rederiveRow(row: CaseRow, settings: SettingsConfig): CaseRow {
     extractedAmount,
     calculatedAmount,
     amountMismatch,
-    // nonPayableAmount/nonPayableCount come from adjudication.json which is not
-    // cached in finalRaw. rederiveRow has no filesystem access, so we preserve
-    // whatever was loaded by the loader — they never change on a settings re-derive.
     nonPayableAmount: row.nonPayableAmount,
     nonPayableCount: row.nonPayableCount,
-    // failCause is also derived from adjudication.json — preserve as-loaded.
     failCause: row.failCause,
     failCauseDetails: row.failCauseDetails,
-    // Judge fields also come from adjudication.json — preserve as-loaded.
     minJudgeScore: row.minJudgeScore,
     avgJudgeScore: row.avgJudgeScore,
     judgeApprovedAgentCount: row.judgeApprovedAgentCount,
@@ -259,7 +277,22 @@ function rederiveRow(row: CaseRow, settings: SettingsConfig): CaseRow {
     stages,
     hasErrors,
     errorDetails,
+    isNotWorking,
   };
+}
+
+// Builds human-readable reasons why a case is flagged as not-working.
+function buildNotWorkingReasons(row: CaseRow): string[] {
+  const reasons: string[] = [];
+  if (row.finalVerdict === null)      reasons.push('No final verdict (case not counted in pass/fail)');
+  if (row.calculatedAmount === null)  reasons.push('Calculated amount is missing');
+  if (row.calculatedAmount === 0)     reasons.push('Calculated amount is zero');
+  if (!row.stages.find(s => s.fileName === 'extraction.json'))
+    reasons.push('Missing extraction stage');
+  if (!row.stages.find(s => s.fileName === 'bill_type_resolution.json'))
+    reasons.push('Missing bill_type_resolution stage');
+  if (reasons.length === 0) reasons.push('Unknown reason');
+  return reasons;
 }
 
 export const useAppStore = create<AppStore>((set, get) => ({
@@ -289,56 +322,27 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const allRows = await loadCaseRows(handle, settings, (done, total) => {
         set({ loadingProgress: { done, total } });
       });
-      
-      // Debug: Check what's being filtered out
-      console.log('=== FILTERING DEBUG ===');
-      console.log('Total loaded cases:', allRows.length);
-      
-      const excludedCases: ExcludedCase[] = [];
-      
-      // Filter to keep only valid cases where:
-      // 1. Both amounts are present (not null) - these show as "—" in the table
-      // 2. Final verdict is present (not null) - critical for analysis
-      // 3. No errors (hasErrors === false) - includes missing data, parse errors
-      const rows = allRows.filter(row => {
-        const reasons: string[] = [];
-        
-        if (row.extractedAmount === null) reasons.push('extractedAmount is null');
-        if (row.calculatedAmount === null) reasons.push('calculatedAmount is null');
-        if (row.finalVerdict === null) reasons.push('finalVerdict is null');
-        if (row.hasErrors === true) reasons.push('hasErrors is true');
-        
-        const isValid = row.extractedAmount !== null && 
-                       row.calculatedAmount !== null &&
-                       row.finalVerdict !== null &&
-                       row.hasErrors === false;
-        
-        if (!isValid) {
-          excludedCases.push({ caseId: row.caseId, reasons, row });
-        }
-        
-        return isValid;
-      });
-      
-      console.log('Valid cases kept:', rows.length);
-      console.log('Cases excluded:', excludedCases.length);
-      console.log('Excluded cases details:', excludedCases);
-      console.log('======================');
-      
-      // Count how many cases were excluded (total loaded - cases kept)
-      const excludedCount = allRows.length - rows.length;
-      
-      const stageColumns = deriveStageColumns(rows);
-      const filteredRows = applyAllFilters(rows, get().filters, get().settings);
+
+      // Build the excluded-cases list from isNotWorking flag set by the loader.
+      // All rows are kept in allCaseRows — the filter hides them by default.
+      const excludedCases: ExcludedCase[] = allRows
+        .filter(row => row.isNotWorking)
+        .map(row => ({
+          caseId: row.caseId,
+          reasons: buildNotWorkingReasons(row),
+          row,
+        }));
+
+      const stageColumns = deriveStageColumns(allRows);
+      const filteredRows = applyAllFilters(allRows, get().filters, settings);
       set({
-        allCaseRows: rows,
+        allCaseRows: allRows,
         stageColumns,
         filteredRows,
-        excludedCasesCount: excludedCount,
+        excludedCasesCount: excludedCases.length,
         excludedCases,
         loadingProgress: null,
       });
-      // Fire-and-forget: don't block the load on persisting the handle.
       saveDirHandle(handle).catch((err) => {
         console.warn('saveDirHandle failed:', err);
       });

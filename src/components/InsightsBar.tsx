@@ -108,18 +108,18 @@ export default function InsightsBar() {
   const setFilter        = useAppStore((s) => s.setFilter);
   const clearAllFilters  = useAppStore((s) => s.clearAllFilters);
   const excludedCasesCount = useAppStore((s) => s.excludedCasesCount);
-  const setExcludedCasesOpen = useAppStore((s) => s.setExcludedCasesOpen);
 
   // Always compute metrics against allCaseRows so card values don't collapse
-  // to zero when a filter is active (e.g. clicking "Passed" should show 52,
-  // not re-filter to 52 and then show 52-within-52).
-  const metricRows = allCaseRows;
-  const threshold  = settings.lowConfidenceThreshold;
+  // to zero when a filter is active. But exclude not-working cases from all
+  // summary metrics — they have no valid verdict and would inflate the totals.
+  const workingRows = allCaseRows.filter(r => !r.isNotWorking);
+  const metricRows  = workingRows;
+  const threshold   = settings.lowConfidenceThreshold;
 
-  // ── Verdict counts (always from allCaseRows for stable display) ─────
-  const total       = metricRows.length;
-  const passed      = passCount(metricRows);
-  const failed      = failCount(metricRows);
+  // ── Verdict counts (only working cases) ─────────────────────────────
+  const total       = workingRows.length;
+  const passed      = passCount(workingRows);
+  const failed      = failCount(workingRows);
   const passRatePct = total === 0 ? '—' : `${((passed / total) * 100).toFixed(0)}% pass rate`;
 
   // ── Fail-reason breakdown ───────────────────────────────────────────
@@ -145,19 +145,19 @@ export default function InsightsBar() {
   const errors = errorCount(metricRows);
 
   // ── Active filter state — drives the active/toggle logic ────────────
-  const isVerdictPass     = filters.finalVerdict === 1;
-  const isVerdictFail     = filters.finalVerdict === 0;
-  const isAmtMismatch     = filters.amountMismatchOnly === true;
-  const isErrorsOnly      = filters.hasErrorsOnly === true;
-  const hasAnyFilter      = isVerdictPass || isVerdictFail || isAmtMismatch || isErrorsOnly;
+  const isVerdictPass    = filters.finalVerdict === 1;
+  const isVerdictFail    = filters.finalVerdict === 0;
+  const isAmtMismatch    = filters.amountMismatchOnly === true;
+  const isErrorsOnly     = filters.hasErrorsOnly === true;
+  const isNotWorkingOnly = filters.notWorkingOnly === true;
+  const hasAnyFilter     = isVerdictPass || isVerdictFail || isAmtMismatch || isErrorsOnly || isNotWorkingOnly;
 
   // Toggle helpers — clicking an already-active filter clears all filters.
   const toggleVerdict = (v: 0 | 1) => {
     if (filters.finalVerdict === v) {
       clearAllFilters();
     } else {
-      // Reset amountMismatchOnly when switching to a verdict-only filter
-      setFilter({ finalVerdict: v, amountMismatchOnly: false, hasErrorsOnly: false });
+      setFilter({ finalVerdict: v, amountMismatchOnly: false, hasErrorsOnly: false, notWorkingOnly: false, hideNotWorking: true });
     }
   };
 
@@ -165,7 +165,7 @@ export default function InsightsBar() {
     if (isAmtMismatch) {
       clearAllFilters();
     } else {
-      setFilter({ finalVerdict: 0, amountMismatchOnly: true, hasErrorsOnly: false });
+      setFilter({ finalVerdict: 0, amountMismatchOnly: true, hasErrorsOnly: false, notWorkingOnly: false, hideNotWorking: true });
     }
   };
 
@@ -173,7 +173,23 @@ export default function InsightsBar() {
     if (isErrorsOnly) {
       clearAllFilters();
     } else {
-      setFilter({ hasErrorsOnly: true, finalVerdict: 'all', amountMismatchOnly: false });
+      setFilter({ hasErrorsOnly: true, finalVerdict: 'all', amountMismatchOnly: false, notWorkingOnly: false, hideNotWorking: true });
+    }
+  };
+
+  // Clicking "Not Working" shows ONLY the not-working cases.
+  // Clicking again returns to the normal view (not-working hidden).
+  const toggleNotWorking = () => {
+    if (isNotWorkingOnly) {
+      clearAllFilters();
+    } else {
+      setFilter({
+        notWorkingOnly: true,
+        hideNotWorking: false,
+        finalVerdict: 'all',
+        amountMismatchOnly: false,
+        hasErrorsOnly: false,
+      });
     }
   };
 
@@ -222,16 +238,17 @@ export default function InsightsBar() {
             label="Total Cases" 
             value={total} 
             variant="muted"
-            tooltip="Total number of cases in your dataset.&#10;Each case is one folder with JSON files.&#10;All metrics below are calculated from these cases."
+            tooltip="Working cases only (not-working cases excluded).&#10;Every case here has a valid verdict, amount, and pipeline stages.&#10;Total Cases = Passed + Failed."
           />
           {excludedCasesCount > 0 && (
             <InsightCard
               label="Not Working"
               value={excludedCasesCount}
-              sub="auto-removed from table"
+              sub={isNotWorkingOnly ? 'showing only these' : 'click to inspect'}
               variant="fail"
-              onClick={() => setExcludedCasesOpen(true)}
-              tooltip="Cases automatically removed from the dashboard.&#10;Missing amounts, parse errors, or incomplete data.&#10;These cases will not appear in the table or metrics.&#10;Click to view the removed cases."
+              active={isNotWorkingOnly}
+              onClick={toggleNotWorking}
+              tooltip="Cases not counted in pass/fail total — no verdict, zero/missing amount, or missing extraction/bill_type_resolution stage.&#10;Click to show ONLY these problem cases in the table.&#10;Click again to return to normal view."
             />
           )}
           <InsightCard

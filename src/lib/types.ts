@@ -112,7 +112,7 @@ export interface FilterState {
     lowConfOnly: boolean;
   }>;
   hasErrorsOnly: boolean;
-  hideNotWorking: boolean;      // if true, hide cases with isNotWorking=true
+  hideNotWorking: boolean;      // if true, hide cases with isNotWorking=true (default)
   notWorkingOnly: boolean;      // if true, show ONLY cases with isNotWorking=true
 }
 

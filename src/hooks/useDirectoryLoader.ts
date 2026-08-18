@@ -359,11 +359,18 @@ async function parseCaseFolder(
     failCauseDetails.length > 0 ? failCauseDetails.map((c) => c.label).join(', ') : null;
 
   // --- Detect "Not Working" cases ---
-  // Cases with calculated_amount = 0, or missing extraction/bill_type_resolution stages
-  const extractionStage = stages.find((s) => s.fileName === 'extraction.json');
-  const billTypeStage = stages.find((s) => s.fileName === 'bill_type_resolution.json');
-  
-  const isNotWorking = 
+  // A case is "not working" when it cannot contribute to pass/fail analytics:
+  //   • finalVerdict is null  — no verdict resolved (missing/unreadable consolidated_final.json
+  //                             or the verdict key path didn't resolve)
+  //   • calculatedAmount is null or 0 — no usable amount data
+  //   • extraction stage is missing  — core pipeline stage absent
+  //   • bill_type_resolution stage is missing — core pipeline stage absent
+  const extractionStage    = stages.find((s) => s.fileName === 'extraction.json');
+  const billTypeStage      = stages.find((s) => s.fileName === 'bill_type_resolution.json');
+
+  const isNotWorking =
+    finalVerdict === null ||
+    calculatedAmount === null ||
     calculatedAmount === 0 ||
     extractionStage === undefined ||
     billTypeStage === undefined;
