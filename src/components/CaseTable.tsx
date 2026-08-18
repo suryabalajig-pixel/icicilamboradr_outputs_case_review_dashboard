@@ -645,7 +645,7 @@ export default function CaseTable() {
           return (
             <td
               key={cell.id}
-              className={`px-3 text-body text-textPrimary ${
+              className={`border-b border-border px-3 text-body text-textPrimary ${
                 isPinned ? 'sticky z-10 bg-card' : ''
               } ${cell.column.id === 'sno' ? 'left-0' : ''} ${cell.column.id === 'caseId' ? 'left-[44px]' : ''}`}
               style={{ width: cell.column.getSize() }}
@@ -683,7 +683,7 @@ export default function CaseTable() {
                   return (
                     <th
                       key={header.id}
-                      className={`px-3 py-2 text-left align-top text-caption font-semibold text-textMuted ${
+                      className={`border-b border-border px-3 py-2 text-left align-top text-caption font-semibold text-textMuted ${
                         isPinned ? 'sticky z-20 bg-surface' : ''
                       } ${header.column.id === 'sno' ? 'left-0' : ''} ${header.column.id === 'caseId' ? 'left-[44px]' : ''} ${header.column.getCanSort() ? 'cursor-pointer' : ''}`}
                       style={{ width: header.getSize() }}
