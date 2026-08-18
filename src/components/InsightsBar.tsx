@@ -263,7 +263,7 @@ export default function InsightsBar() {
           <InsightCard
             label="Failed"
             value={failed}
-            sub={total > 0 ? `${((failed / total) * 100).toFixed(0)}% of total` : undefined}
+            sub={total > 0 ? `${((failed / total) * 100).toFixed(0)}% failure rate` : undefined}
             variant={failed > 0 ? 'fail' : 'muted'}
             active={isVerdictFail && !isAmtMismatch}
             onClick={() => toggleVerdict(0)}
@@ -284,7 +284,7 @@ export default function InsightsBar() {
           <Divider />
 
           {/* ── GROUP 2: Why Failed ───────────────────────────────────── */}
-          <GroupLabel label="Why Failed" variant="fail" />
+          <GroupLabel label="Failure Cause" variant="fail" />
           <InsightCard
             label="Amount Mismatch"
             value={failAmtMismatch}
@@ -295,9 +295,9 @@ export default function InsightsBar() {
             tooltip="Failed cases where extracted amount doesn't match calculated.&#10;The system found a different total than expected.&#10;Click to filter and view only these mismatches."
           />
           <InsightCard
-            label={`Low Conf <${(threshold * 100).toFixed(0)}%`}
+            label={`Low Confidence (<${(threshold * 100).toFixed(0)}%)`}
             value={failLowConf}
-            sub="amounts match, conf low"
+            sub="amounts match, but confidence score low"
             variant={failLowConf > 0 ? 'fail' : 'muted'}
             active={isVerdictFail && !isAmtMismatch && !isErrorsOnly}
             onClick={() => toggleVerdict(0)}
@@ -307,26 +307,26 @@ export default function InsightsBar() {
           <Divider />
 
           {/* ── GROUP 3: Knocked ──────────────────────────────────────── */}
-          <GroupLabel label="Knocked" variant="warn" />
+          <GroupLabel label="Knocked Off" variant="warn" />
           <InsightCard
-            label="Total With Knocked"
+            label="Cases With Knocked off Charges"
             value={totalWithKnocked}
             variant={totalWithKnocked > 0 ? 'warn' : 'muted'}
             tooltip="Cases where some charges were marked non-payable.&#10;'Knocked' means financial agent deducted certain items.&#10;Includes both passed and failed cases with deductions."
           />
           <InsightCard
-            label="Passed With Knocked"
+            label="Passed With Knocked Off"
             value={passWithKnocked}
-            sub="verdict=1, deductions"
+            sub="verdict=1 having knocked off charges"
             variant={passWithKnocked > 0 ? 'pass' : 'muted'}
             active={isVerdictPass}
             onClick={() => toggleVerdict(1)}
             tooltip="Cases approved despite having non-payable deductions.&#10;Some charges were knocked off but case still passed.&#10;Click to filter and view all passed cases."
           />
           <InsightCard
-            label="Failed With Knocked"
+            label="Failed With Knocked Off"
             value={failWithKnocked}
-            sub="verdict=0, deductions"
+            sub="verdict=0 having knocked off charges"
             variant={failWithKnocked > 0 ? 'fail' : 'muted'}
             active={isVerdictFail && !isAmtMismatch}
             onClick={() => toggleVerdict(0)}
@@ -339,10 +339,10 @@ export default function InsightsBar() {
           {perStage.length > 0 && (
             <>
               <Divider />
-              <GroupLabel label="Pipeline" />
+              <GroupLabel label="Judges" />
               {perStage.map((s) => (
                 <InsightCard
-                  key={s.fileName}
+                  key={s.fileName}  
                   label={stageLabel(s.fileName)}
                   value={s.avg === null ? '—' : s.avg.toFixed(2)}
                   sub={s.lowCount > 0 ? `${s.lowCount} low` : 'all good'}
