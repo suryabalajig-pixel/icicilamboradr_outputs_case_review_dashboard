@@ -4,9 +4,7 @@ import {
   failCount,
   failedByAmountMismatchCount,
   failedByLowConfidenceCount,
-  failedByAgentBlockCount,
   failedWithKnockedCount,
-  failedWithoutKnockedCount,
   passedWithKnockedCount,
   withKnockedCount,
   passedWithJudgeApprovalCount,
@@ -32,6 +30,7 @@ interface InsightCardProps {
 }
 
 function InsightCard({ label, value, sub, flag, active, onClick, variant = 'default', tooltip }: InsightCardProps) {
+function InsightCard({ label, value, sub, flag, active, onClick, variant = 'default', tooltip }: InsightCardProps) {
   const valueColor: Record<string, string> = {
     default: 'text-textPrimary',
     pass:    'text-green-600',
@@ -39,6 +38,10 @@ function InsightCard({ label, value, sub, flag, active, onClick, variant = 'defa
     warn:    'text-amber-600',
     muted:   'text-textMuted',
   };
+
+  const titleText = active 
+    ? 'Click to clear this filter' 
+    : tooltip || undefined;
 
   return (
     <div
@@ -133,13 +136,11 @@ export default function InsightsBar() {
   // ── Fail-reason breakdown ───────────────────────────────────────────
   const failAmtMismatch = failedByAmountMismatchCount(metricRows);
   const failLowConf     = failedByLowConfidenceCount(metricRows, threshold);
-  const failAgentBlock  = failedByAgentBlockCount(metricRows, threshold);
 
   // ── Knocked ─────────────────────────────────────────────────────────
   const totalWithKnocked   = withKnockedCount(metricRows);
   const passWithKnocked    = passedWithKnockedCount(metricRows);
   const failWithKnocked    = failedWithKnockedCount(metricRows);
-  const failWithoutKnocked = failedWithoutKnockedCount(metricRows);
 
   // ── Judge override ──────────────────────────────────────────────────
   const passAnyFlag   = passedWithAnyJudgeFlagCount(metricRows);
