@@ -30,7 +30,6 @@ interface InsightCardProps {
 }
 
 function InsightCard({ label, value, sub, flag, active, onClick, variant = 'default', tooltip }: InsightCardProps) {
-function InsightCard({ label, value, sub, flag, active, onClick, variant = 'default', tooltip }: InsightCardProps) {
   const valueColor: Record<string, string> = {
     default: 'text-textPrimary',
     pass:    'text-green-600',
@@ -38,10 +37,6 @@ function InsightCard({ label, value, sub, flag, active, onClick, variant = 'defa
     warn:    'text-amber-600',
     muted:   'text-textMuted',
   };
-
-  const titleText = active 
-    ? 'Click to clear this filter' 
-    : tooltip || undefined;
 
   return (
     <div
@@ -76,9 +71,7 @@ function InsightCard({ label, value, sub, flag, active, onClick, variant = 'defa
       {sub && <span className="text-[11px] leading-tight text-textMuted">{sub}</span>}
     </div>
   );
-}
-
-// ─── GroupLabel ───────────────────────────────────────────────────────────────
+}// ─── GroupLabel ───────────────────────────────────────────────────────────────
 // Vertical label that sits between a divider and its group of cards.
 
 interface GroupLabelProps {
