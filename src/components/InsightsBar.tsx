@@ -28,9 +28,10 @@ interface InsightCardProps {
   active?: boolean;         // true = card is the currently active filter
   onClick?: () => void;
   variant?: 'default' | 'pass' | 'fail' | 'warn' | 'muted';
+  tooltip?: string;          // hover tooltip text
 }
 
-function InsightCard({ label, value, sub, flag, active, onClick, variant = 'default' }: InsightCardProps) {
+function InsightCard({ label, value, sub, flag, active, onClick, variant = 'default', tooltip }: InsightCardProps) {
   const valueColor: Record<string, string> = {
     default: 'text-textPrimary',
     pass:    'text-green-600',
@@ -42,7 +43,7 @@ function InsightCard({ label, value, sub, flag, active, onClick, variant = 'defa
   return (
     <div
       onClick={onClick}
-      title={active ? 'Click to clear this filter' : undefined}
+      title={tooltip || (active ? 'Click to clear this filter' : undefined)}
       className={[
         'flex min-w-[140px] flex-col gap-1 rounded-lg border bg-card px-3 py-2.5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md',
         onClick ? 'cursor-pointer' : '',
@@ -115,6 +116,7 @@ export default function InsightsBar() {
   const filters          = useAppStore((s) => s.filters);
   const setFilter        = useAppStore((s) => s.setFilter);
   const clearAllFilters  = useAppStore((s) => s.clearAllFilters);
+  const excludedCasesCount = useAppStore((s) => s.excludedCasesCount);
 
   // Always compute metrics against allCaseRows so card values don't collapse
   // to zero when a filter is active (e.g. clicking "Passed" should show 52,
@@ -233,7 +235,21 @@ export default function InsightsBar() {
 
           {/* ── GROUP 1: Summary ──────────────────────────────────────── */}
           <GroupLabel label="Summary" />
-          <InsightCard label="Total Cases" value={total} variant="muted" />
+          <InsightCard 
+            label="Total Cases" 
+            value={total} 
+            variant="muted"
+            tooltip="Total number of cases in your dataset.&#10;Each case is one folder with JSON files.&#10;All metrics below are calculated from these cases."
+          />
+          {excludedCasesCount > 0 && (
+            <InsightCard
+              label="Not Working"
+              value={excludedCasesCount}
+              sub="auto-removed from table"
+              variant="fail"
+              tooltip="Cases automatically removed from the dashboard.&#10;Missing amounts, parse errors, or incomplete data.&#10;These cases will not appear in the table or metrics."
+            />
+          )}
           <InsightCard
             label="Passed"
             value={passed}
@@ -241,6 +257,7 @@ export default function InsightsBar() {
             variant={passed > 0 ? 'pass' : 'muted'}
             active={isVerdictPass}
             onClick={() => toggleVerdict(1)}
+            tooltip="Cases where final verdict is 1 (approved).&#10;These cases passed all validation checks.&#10;Click to filter and view only passed cases."
           />
           <InsightCard
             label="Failed"
@@ -249,6 +266,7 @@ export default function InsightsBar() {
             variant={failed > 0 ? 'fail' : 'muted'}
             active={isVerdictFail && !isAmtMismatch}
             onClick={() => toggleVerdict(0)}
+            tooltip="Cases where final verdict is 0 (rejected).&#10;Failed due to amount mismatch, low confidence, or agent block.&#10;Click to filter and view only failed cases."
           />
           {errors > 0 && (
             <InsightCard
@@ -258,6 +276,7 @@ export default function InsightsBar() {
               variant="fail"
               active={isErrorsOnly}
               onClick={toggleErrors}
+              tooltip="Cases with missing or corrupted JSON files.&#10;These files couldn't be read or parsed properly.&#10;Click to filter and view cases with errors."
             />
           )}
 
@@ -272,6 +291,7 @@ export default function InsightsBar() {
             variant={failAmtMismatch > 0 ? 'warn' : 'muted'}
             active={isAmtMismatch}
             onClick={toggleAmtMismatch}
+            tooltip="Failed cases where extracted amount doesn't match calculated.&#10;The system found a different total than expected.&#10;Click to filter and view only these mismatches."
           />
           <InsightCard
             label={`Low Conf <${(threshold * 100).toFixed(0)}%`}
@@ -280,13 +300,7 @@ export default function InsightsBar() {
             variant={failLowConf > 0 ? 'fail' : 'muted'}
             active={isVerdictFail && !isAmtMismatch && !isErrorsOnly}
             onClick={() => toggleVerdict(0)}
-          />
-          <InsightCard
-            label="Agent Blocked"
-            value={failAgentBlock}
-            sub="doc / admin / financial"
-            variant={failAgentBlock > 0 ? 'warn' : 'muted'}
-            onClick={() => toggleVerdict(0)}
+            tooltip={`Failed because confidence score is below ${(threshold * 100).toFixed(0)}%.&#10;Amounts matched but system wasn't confident enough.&#10;Click to view all failed cases.`}
           />
 
           <Divider />
@@ -297,6 +311,7 @@ export default function InsightsBar() {
             label="Total With Knocked"
             value={totalWithKnocked}
             variant={totalWithKnocked > 0 ? 'warn' : 'muted'}
+            tooltip="Cases where some charges were marked non-payable.&#10;'Knocked' means financial agent deducted certain items.&#10;Includes both passed and failed cases with deductions."
           />
           <InsightCard
             label="Passed With Knocked"
@@ -305,21 +320,7 @@ export default function InsightsBar() {
             variant={passWithKnocked > 0 ? 'pass' : 'muted'}
             active={isVerdictPass}
             onClick={() => toggleVerdict(1)}
-          />
-          <InsightCard
-            label="Failed With Knocked"
-            value={failWithKnocked}
-            sub="verdict=0, deductions"
-            variant={failWithKnocked > 0 ? 'fail' : 'muted'}
-            active={isVerdictFail && !isAmtMismatch}
-            onClick={() => toggleVerdict(0)}
-          />
-          <InsightCard
-            label="Failed No Knocked"
-            value={failWithoutKnocked}
-            sub="verdict=0, no deductions"
-            variant={failWithoutKnocked > 0 ? 'warn' : 'muted'}
-            onClick={() => toggleVerdict(0)}
+            tooltip="Cases approved despite having non-payable deductions.&#10;Some charges were knocked off but case still passed.&#10;Click to filter and view all passed cases."
           />
 
           <Divider />
@@ -334,6 +335,7 @@ export default function InsightsBar() {
             variant={passAnyFlag > 0 ? 'warn' : 'muted'}
             active={isVerdictPass}
             onClick={() => toggleVerdict(1)}
+            tooltip="Passed cases with at least one judge flag.&#10;Judge flagged status=fail, status=pass, or score below 0.70.&#10;Click to filter and view all passed cases."
           />
           <InsightCard
             label="Judge Fail Flag"
@@ -343,6 +345,7 @@ export default function InsightsBar() {
             variant={passJudgeFail > 0 ? 'fail' : 'muted'}
             active={isVerdictPass}
             onClick={() => toggleVerdict(1)}
+            tooltip="Passed cases where judge marked agent status as 'fail'.&#10;System approved but human reviewer disagreed.&#10;These need attention - click to view passed cases."
           />
           <InsightCard
             label="Judge Approved"
@@ -351,6 +354,7 @@ export default function InsightsBar() {
             variant={passJudgePass > 0 ? 'pass' : 'muted'}
             active={isVerdictPass}
             onClick={() => toggleVerdict(1)}
+            tooltip="Cases where judge explicitly set status='pass'.&#10;Human reviewer fully approved the agent output.&#10;Click to filter and view all passed cases."
           />
           <InsightCard
             label="Low Judge Score"
@@ -359,6 +363,7 @@ export default function InsightsBar() {
             variant={passLowScore > 0 ? 'warn' : 'muted'}
             active={isVerdictPass}
             onClick={() => toggleVerdict(1)}
+            tooltip="Passed cases where lowest judge score is below 75%.&#10;At least one agent had low judge confidence.&#10;Click to filter and view all passed cases."
           />
 
           {/* ── GROUP 5: Pipeline Stages ──────────────────────────────── */}
@@ -373,6 +378,7 @@ export default function InsightsBar() {
                   value={s.avg === null ? '—' : s.avg.toFixed(2)}
                   sub={s.lowCount > 0 ? `${s.lowCount} low` : 'all good'}
                   variant={s.lowCount > 0 ? 'warn' : 'muted'}
+                  tooltip={`Average confidence score for this processing stage.&#10;Shows how confident the system was during ${stageLabel(s.fileName)}.&#10;Higher scores mean better quality extraction.`}
                 />
               ))}
             </>

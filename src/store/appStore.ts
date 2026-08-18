@@ -262,6 +262,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   allCaseRows: [],
   stageColumns: [],
   loadingProgress: null,
+  excludedCasesCount: 0,
 
   settings: DEFAULT_SETTINGS,
 
@@ -279,15 +280,56 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ loadingProgress: { done: 0, total: 0 } });
     try {
       const { settings } = get();
-      const rows = await loadCaseRows(handle, settings, (done, total) => {
+      const allRows = await loadCaseRows(handle, settings, (done, total) => {
         set({ loadingProgress: { done, total } });
       });
+      
+      // Debug: Check what's being filtered out
+      console.log('=== FILTERING DEBUG ===');
+      console.log('Total loaded cases:', allRows.length);
+      
+      const excludedCases: Array<{caseId: string, reasons: string[]}> = [];
+      
+      // Filter to keep only valid cases where:
+      // 1. Both amounts are present (not null) - these show as "—" in the table
+      // 2. Final verdict is present (not null) - critical for analysis
+      // 3. No errors (hasErrors === false) - includes missing data, parse errors
+      const rows = allRows.filter(row => {
+        const reasons: string[] = [];
+        
+        if (row.extractedAmount === null) reasons.push('extractedAmount is null');
+        if (row.calculatedAmount === null) reasons.push('calculatedAmount is null');
+        if (row.finalVerdict === null) reasons.push('finalVerdict is null');
+        if (row.hasErrors === true) reasons.push('hasErrors is true');
+        
+        const isValid = row.extractedAmount !== null && 
+                       row.calculatedAmount !== null &&
+                       row.finalVerdict !== null &&
+                       row.hasErrors === false;
+        
+        if (!isValid) {
+          excludedCases.push({ caseId: row.caseId, reasons });
+          console.log(`EXCLUDED: ${row.caseId}`, reasons);
+        }
+        
+        return isValid;
+      });
+      
+      console.log('Valid cases kept:', rows.length);
+      console.log('Cases excluded:', excludedCases.length);
+      console.log('Excluded cases details:', excludedCases);
+      console.log('======================');
+      
+      // Count how many cases were excluded (total loaded - cases kept)
+      const excludedCount = allRows.length - rows.length;
+      
       const stageColumns = deriveStageColumns(rows);
       const filteredRows = applyAllFilters(rows, get().filters, get().settings);
       set({
         allCaseRows: rows,
         stageColumns,
         filteredRows,
+        excludedCasesCount: excludedCount,
         loadingProgress: null,
       });
       // Fire-and-forget: don't block the load on persisting the handle.

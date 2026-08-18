@@ -107,6 +107,7 @@ export interface AppStore {
   allCaseRows: CaseRow[];
   stageColumns: string[];
   loadingProgress: { done: number; total: number } | null;
+  excludedCasesCount: number; // Count of cases filtered out due to missing extraction data
 
   settings: SettingsConfig;
   updateSettings: (patch: Partial<SettingsConfig>) => void;
