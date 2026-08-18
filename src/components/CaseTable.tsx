@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   createColumnHelper,
   flexRender,
@@ -250,6 +250,135 @@ function StageCell({
   );
 }
 
+// ─── FailCauseCell ────────────────────────────────────────────────────────────
+// Renders each fail cause on its own line. For causes that carry stage-level
+// details (e.g. "Low confidence" → which stages scored low), an ⓘ button opens
+// a popover listing those stages — mirroring the AmountsMatchCell pattern.
+
+function FailCauseCell({ details }: { details: CaseRow['failCauseDetails'] }) {
+  const [openCause, setOpenCause] = useState<string | null>(null);
+
+  if (details.length === 0) {
+    return <span className="text-textMuted">—</span>;
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      {details.map((d) => (
+        <div key={d.label} className="flex items-center gap-1">
+          <span className="rounded bg-red-100 px-1.5 py-0.5 text-caption font-medium text-red-700">
+            {d.label}
+          </span>
+          {d.stages.length > 0 && (
+            <div className="relative inline-flex items-center">
+              <button
+                type="button"
+                onClick={() => setOpenCause(openCause === d.label ? null : d.label)}
+                title={`View stages with ${d.label.toLowerCase()}`}
+                className="rounded px-0.5 text-[11px] text-textMuted hover:text-textPrimary focus:outline-none"
+              >
+                ⓘ
+              </button>
+              {openCause === d.label && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setOpenCause(null)} />
+                  <div className="absolute left-0 top-full z-40 mt-1 min-w-[180px] rounded-lg border border-border bg-card p-3 shadow-lg">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-caption font-semibold text-textPrimary">
+                        Low confidence stages
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setOpenCause(null)}
+                        className="text-textMuted hover:text-textPrimary"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <ul className="flex flex-col gap-1">
+                      {d.stages.map((stage) => (
+                        <li
+                          key={stage}
+                          className="rounded bg-amber-100 px-2 py-0.5 text-caption font-medium text-amber-700"
+                        >
+                          {stage}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── AmountToleranceSlider ────────────────────────────────────────────────────
+// Compact tolerance slider for the amounts_match column header. The thumb
+// tracks a local state so dragging stays buttery-smooth; the expensive
+// re-derivation (which recomputes every row's amountMismatch) is debounced
+// and only fires after the user stops moving for a moment.
+
+function AmountToleranceSlider() {
+  const amounts = useAppStore((s) => s.settings.amounts);
+  const updateSettings = useAppStore((s) => s.updateSettings);
+  const rederiveCaseRows = useAppStore((s) => s.rederiveCaseRows);
+
+  const [value, setValue] = useState(amounts.tolerance);
+  const [dragging, setDragging] = useState(false);
+  const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Keep the local thumb in sync when the stored tolerance changes from
+  // elsewhere (e.g. Settings panel save).
+  useEffect(() => {
+    if (!dragging) setValue(amounts.tolerance);
+  }, [amounts.tolerance, dragging]);
+
+  // Clear any pending commit when unmounting.
+  useEffect(() => () => {
+    if (commitTimer.current) clearTimeout(commitTimer.current);
+  }, []);
+
+  const commit = (next: number) => {
+    updateSettings({ amounts: { ...amounts, tolerance: next } });
+    rederiveCaseRows();
+  };
+
+  const handleChange = (next: number) => {
+    setValue(next);
+    if (commitTimer.current) clearTimeout(commitTimer.current);
+    commitTimer.current = setTimeout(() => commit(next), 250);
+  };
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <label className="flex items-center justify-between text-caption text-textMuted">
+        <span>Tolerance</span>
+        <span className="font-mono">₹{value}</span>
+      </label>
+      <input
+        type="range"
+        min={0}
+        max={10}
+        step={1}
+        value={value}
+        onChange={(e) => handleChange(Number(e.target.value))}
+        onPointerDown={() => setDragging(true)}
+        onPointerUp={() => {
+          setDragging(false);
+          if (commitTimer.current) clearTimeout(commitTimer.current);
+          commit(value);
+        }}
+        title="Amount match tolerance — max ₹ difference treated as a match"
+        className="w-full accent-accent"
+      />
+    </div>
+  );
+}
+
 export default function CaseTable() {
   const filteredRows = useAppStore((s) => s.filteredRows);
   const allCaseRows = useAppStore((s) => s.allCaseRows);
@@ -261,6 +390,9 @@ export default function CaseTable() {
   const clearAllFilters = useAppStore((s) => s.clearAllFilters);
 
   const [sorting, setSorting] = useState<SortingState>([]);
+  const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>({
+    tokenSummary: false,
+  });
 
   const stageLabel = (fileName: string): string => {
     for (const row of allCaseRows) {
@@ -275,7 +407,7 @@ export default function CaseTable() {
       // ── S.No — pinned, display-only, shows visual row position ───────
       columnHelper.display({
         id: 'sno',
-        size: 52,
+        size: 44,
         header: () => <span className="text-textMuted">#</span>,
         cell: (info) => (
           <span className="font-mono text-caption text-textMuted">
@@ -285,18 +417,22 @@ export default function CaseTable() {
       }),
       columnHelper.accessor('caseId', {
         id: 'caseId',
-        size: 180,
+        size: 200,
         header: () => (
           <div className="flex flex-col gap-1">
             <span>Case ID</span>
             <ColumnFilterHeader columnId="caseId" />
           </div>
         ),
-        cell: (info) => <span className="font-mono">{info.getValue()}</span>,
+        cell: (info) => (
+          <span className="block truncate font-mono" title={info.getValue()}>
+            {info.getValue()}
+          </span>
+        ),
       }),
       columnHelper.accessor('finalVerdict', {
         id: 'finalVerdict',
-        size: 150,
+        size: 120,
         header: () => (
           <div className="flex flex-col gap-1">
             <span>Final Verdict</span>
@@ -315,21 +451,9 @@ export default function CaseTable() {
       }),
       columnHelper.accessor('failCause', {
         id: 'failCause',
-        size: 220,
+        size: 260,
         header: () => <span>Possible Fail Cause</span>,
-        cell: (info) => {
-          const val = info.getValue();
-          if (val === null || val === '') {
-            return <span className="text-textMuted">—</span>;
-          }
-          return (
-            <span className="inline-flex items-center gap-1">
-              <span className="rounded bg-red-100 px-1.5 py-0.5 text-caption font-medium text-red-700">
-                {val}
-              </span>
-            </span>
-          );
-        },
+        cell: (info) => <FailCauseCell details={info.row.original.failCauseDetails} />,
         sortingFn: (a, b) => {
           const va = a.original.failCause ?? '';
           const vb = b.original.failCause ?? '';
@@ -338,7 +462,7 @@ export default function CaseTable() {
       }),
       columnHelper.accessor('overallConfidence', {
         id: 'overallConfidence',
-        size: 150,
+        size: 130,
         header: () => <span>Overall Confidence</span>,
         cell: (info) => (
           <ConfidencePill
@@ -355,11 +479,12 @@ export default function CaseTable() {
       }),
       columnHelper.accessor('amountMismatch', {
         id: 'amountMismatch',
-        size: 160,
+        size: 150,
         header: () => (
           <div className="flex flex-col gap-1">
             <span>amounts_match</span>
             <ColumnFilterHeader columnId="amountMismatch" />
+            <AmountToleranceSlider />
           </div>
         ),
         cell: (info) => {
@@ -389,7 +514,7 @@ export default function CaseTable() {
       }),
       columnHelper.accessor('nonPayableCount', {
         id: 'nonPayableCount',
-        size: 160,
+        size: 150,
         header: () => (
           <div className="flex flex-col gap-1">
             <span>Knocked Line Items</span>
@@ -421,7 +546,7 @@ export default function CaseTable() {
       }),
       columnHelper.accessor('billTypeMatchCounts', {
         id: 'billTypeMatchCounts',
-        size: 150,
+        size: 130,
         header: () => <span>Bill Type Match</span>,
         cell: (info) => <BillTypeMatchCell counts={info.getValue()} />,
         sortingFn: (a, b) => {
@@ -437,7 +562,7 @@ export default function CaseTable() {
       columnHelper.accessor('tokenSummary', {
         id: 'tokenSummary',
         size: 170,
-        header: () => <span>Token Summary</span>,
+        header: () => <span>Token Count</span>,
         cell: (info) => <TokenSummaryCell summary={info.getValue()} />,
         sortingFn: (a, b) => {
           const aTotal = a.original.tokenSummary.overallTotalTokens ?? 0;
@@ -451,7 +576,9 @@ export default function CaseTable() {
           size: 180,
           header: () => (
             <div className="flex flex-col gap-1">
-              <span>{stageLabel(fileName)}</span>
+              <span className="truncate" title={stageLabel(fileName)}>
+                {stageLabel(fileName)}
+              </span>
               <ColumnFilterHeader columnId={fileName} />
             </div>
           ),
@@ -481,8 +608,10 @@ export default function CaseTable() {
     state: {
       sorting,
       columnPinning: { left: ['sno', 'caseId'] },
+      columnVisibility,
     },
     onSortingChange: setSorting,
+    onColumnVisibilityChange: setColumnVisibility,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
   });
@@ -518,7 +647,7 @@ export default function CaseTable() {
               key={cell.id}
               className={`px-3 text-body text-textPrimary ${
                 isPinned ? 'sticky z-10 bg-card' : ''
-              } ${cell.column.id === 'sno' ? 'left-0' : ''} ${cell.column.id === 'caseId' ? 'left-[52px]' : ''}`}
+              } ${cell.column.id === 'sno' ? 'left-0' : ''} ${cell.column.id === 'caseId' ? 'left-[44px]' : ''}`}
               style={{ width: cell.column.getSize() }}
             >
               {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -531,8 +660,21 @@ export default function CaseTable() {
 
   return (
     <div className="flex h-full flex-col">
+      <div className="flex items-center gap-3 border-b border-border bg-surface px-4 py-2">
+        <button
+          type="button"
+          onClick={() => setColumnVisibility((v) => ({ ...v, tokenSummary: !v.tokenSummary }))}
+          className={`rounded-full px-3 py-0.5 text-caption font-medium transition-colors ${
+            columnVisibility.tokenSummary
+              ? 'bg-accent text-white shadow-sm'
+              : 'bg-card text-textMuted hover:bg-rowHover'
+          }`}
+        >
+          Token Count
+        </button>
+      </div>
       <div ref={containerRef} className="flex-1 overflow-auto">
-        <table className="w-full border-collapse">
+        <table className="table-fixed border-collapse" style={{ width: table.getTotalSize() }}>
           <thead className="sticky top-0 z-20 bg-surface">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>
@@ -543,7 +685,7 @@ export default function CaseTable() {
                       key={header.id}
                       className={`px-3 py-2 text-left align-top text-caption font-semibold text-textMuted ${
                         isPinned ? 'sticky z-20 bg-surface' : ''
-                      } ${header.column.id === 'sno' ? 'left-0' : ''} ${header.column.id === 'caseId' ? 'left-[52px]' : ''} ${header.column.getCanSort() ? 'cursor-pointer' : ''}`}
+                      } ${header.column.id === 'sno' ? 'left-0' : ''} ${header.column.id === 'caseId' ? 'left-[44px]' : ''} ${header.column.getCanSort() ? 'cursor-pointer' : ''}`}
                       style={{ width: header.getSize() }}
                       onClick={header.column.getToggleSortingHandler()}
                     >
@@ -573,7 +715,7 @@ export default function CaseTable() {
                     transform: `translateY(${virtualRow.start}px)`,
                   }}
                 >
-                  <table className="w-full border-collapse">
+                  <table className="table-fixed border-collapse" style={{ width: table.getTotalSize() }}>
                     <tbody>{renderRow(virtualRow.index)}</tbody>
                   </table>
                 </div>

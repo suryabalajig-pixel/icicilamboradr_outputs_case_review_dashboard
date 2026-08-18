@@ -4,6 +4,7 @@ import FolderPicker from './components/FolderPicker';
 import CaseTable from './components/CaseTable';
 import InsightsBar from './components/InsightsBar';
 import JsonDetailModal from './components/JsonDetailModal';
+import ExcludedCasesModal from './components/ExcludedCasesModal';
 import { useAppStore } from './store/appStore';
 import { usePersistedSettings } from './hooks/usePersistedSettings';
 import { loadDirHandle, queryDirHandlePermission } from './lib/dirHandleStore';
@@ -90,6 +91,7 @@ export default function App() {
         {allCaseRows.length > 0 && loadingProgress === null && <DashboardView />}
       </AppShell>
       <JsonDetailModal />
+      <ExcludedCasesModal />
     </>
   );
 }

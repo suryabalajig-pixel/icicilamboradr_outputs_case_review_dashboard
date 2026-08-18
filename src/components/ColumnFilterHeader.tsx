@@ -111,7 +111,7 @@ function VerdictFilter({
 
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-1">
+      <div className="flex flex-wrap items-center gap-1">
         <div className="flex gap-1">
           {(['all', 1, 0] as const).map((opt) => (
             <button
@@ -150,7 +150,7 @@ function AmountMismatchFilter({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-1">
+      <div className="flex flex-wrap items-center gap-1">
         <div className="flex gap-1">
           {[false, true].map((opt) => (
             <button
@@ -204,7 +204,7 @@ function StageFilter({
 
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-1">
+      <div className="flex flex-wrap items-center gap-1">
         <input
           type="number"
           placeholder="Min"

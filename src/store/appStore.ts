@@ -6,6 +6,7 @@ import type {
   AppStore,
   BillTypeMatchCounts,
   CaseRow,
+  ExcludedCase,
   FilterState,
   SettingsConfig,
   StageResult,
@@ -49,12 +50,6 @@ export function matchesAmountMatchFilter(
   return true;
 }
 
-export function matchesNotWorkingFilter(row: CaseRow, hideNotWorking: boolean, notWorkingOnly: boolean): boolean {
-  if (notWorkingOnly) return row.isNotWorking === true;   // show ONLY not-working cases
-  if (hideNotWorking) return row.isNotWorking === false;  // hide not-working cases
-  return true;                                            // show all
-}
-
 export function matchesStageFilter(
   row: CaseRow,
   fileName: string,
@@ -95,7 +90,6 @@ export function applyAllFilters(
       matchesHasErrorsFilter(row, filters.hasErrorsOnly) &&
       matchesAmountMismatchFilter(row, filters.amountMismatchOnly) &&
       matchesAmountMatchFilter(row, filters.amountMatchFilter) &&
-      matchesNotWorkingFilter(row, filters.hideNotWorking, filters.notWorkingOnly) &&
       Object.entries(filters.stages).every(([fileName, stageFilter]) =>
         matchesStageFilter(row, fileName, stageFilter, settings.lowConfidenceThreshold)
       )
@@ -120,8 +114,6 @@ const DEFAULT_FILTERS: FilterState = {
   hasErrorsOnly: false,
   amountMismatchOnly: false,
   amountMatchFilter: 'all',
-  hideNotWorking: true,   // hide not-working by default
-  notWorkingOnly: false,  // not in "show only not-working" mode
 };
 
 // Resolves a value at `path` on `raw`, coercing it to a number or null.
@@ -194,11 +186,13 @@ function rederiveRow(row: CaseRow, settings: SettingsConfig): CaseRow {
     }
   }
 
-  // Calculate mismatch: differ by more than 5 (same margin as the loader).
+  // Calculate mismatch: differ by more than the configured tolerance
+  // (default ₹5). Differences ≤ tolerance are treated as matching (rounding
+  // artefacts in OCR / extraction are common at this scale).
   const amountMismatch =
     extractedAmount !== null &&
     calculatedAmount !== null &&
-    Math.abs(extractedAmount - calculatedAmount) > 5;
+    Math.abs(extractedAmount - calculatedAmount) > settings.amounts.tolerance;
 
   const stages: StageResult[] = row.stages.map((stage) => {
     const override = settings.stageOverrides[stage.fileName];
@@ -239,15 +233,6 @@ function rederiveRow(row: CaseRow, settings: SettingsConfig): CaseRow {
 
   const hasErrors = errorDetails.length > 0;
 
-  // Re-detect "Not Working" status
-  const extractionStage = stages.find((s) => s.fileName === 'extraction.json');
-  const billTypeStage = stages.find((s) => s.fileName === 'bill_type_resolution.json');
-  
-  const isNotWorking = 
-    calculatedAmount === 0 ||
-    extractionStage === undefined ||
-    billTypeStage === undefined;
-
   return {
     ...row,
     finalVerdict,
@@ -262,6 +247,7 @@ function rederiveRow(row: CaseRow, settings: SettingsConfig): CaseRow {
     nonPayableCount: row.nonPayableCount,
     // failCause is also derived from adjudication.json — preserve as-loaded.
     failCause: row.failCause,
+    failCauseDetails: row.failCauseDetails,
     // Judge fields also come from adjudication.json — preserve as-loaded.
     minJudgeScore: row.minJudgeScore,
     avgJudgeScore: row.avgJudgeScore,
@@ -273,7 +259,6 @@ function rederiveRow(row: CaseRow, settings: SettingsConfig): CaseRow {
     stages,
     hasErrors,
     errorDetails,
-    isNotWorking,
   };
 }
 
@@ -282,6 +267,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   stageColumns: [],
   loadingProgress: null,
   excludedCasesCount: 0,
+  excludedCases: [],
+  excludedCasesOpen: false,
 
   settings: DEFAULT_SETTINGS,
 
@@ -303,22 +290,52 @@ export const useAppStore = create<AppStore>((set, get) => ({
         set({ loadingProgress: { done, total } });
       });
       
-      // Count "not working" cases (auto-excluded from table)
-      const notWorkingCases = allRows.filter(row => row.isNotWorking);
-      const excludedCount = notWorkingCases.length;
+      // Debug: Check what's being filtered out
+      console.log('=== FILTERING DEBUG ===');
+      console.log('Total loaded cases:', allRows.length);
       
-      console.log('=== CASE LOADING SUMMARY ===');
-      console.log('Total loaded:', allRows.length);
-      console.log('Not working (auto-excluded):', excludedCount);
-      console.log('Valid cases for table:', allRows.length - excludedCount);
+      const excludedCases: ExcludedCase[] = [];
       
-      const stageColumns = deriveStageColumns(allRows);
-      const filteredRows = applyAllFilters(allRows, get().filters, get().settings);
+      // Filter to keep only valid cases where:
+      // 1. Both amounts are present (not null) - these show as "—" in the table
+      // 2. Final verdict is present (not null) - critical for analysis
+      // 3. No errors (hasErrors === false) - includes missing data, parse errors
+      const rows = allRows.filter(row => {
+        const reasons: string[] = [];
+        
+        if (row.extractedAmount === null) reasons.push('extractedAmount is null');
+        if (row.calculatedAmount === null) reasons.push('calculatedAmount is null');
+        if (row.finalVerdict === null) reasons.push('finalVerdict is null');
+        if (row.hasErrors === true) reasons.push('hasErrors is true');
+        
+        const isValid = row.extractedAmount !== null && 
+                       row.calculatedAmount !== null &&
+                       row.finalVerdict !== null &&
+                       row.hasErrors === false;
+        
+        if (!isValid) {
+          excludedCases.push({ caseId: row.caseId, reasons, row });
+        }
+        
+        return isValid;
+      });
+      
+      console.log('Valid cases kept:', rows.length);
+      console.log('Cases excluded:', excludedCases.length);
+      console.log('Excluded cases details:', excludedCases);
+      console.log('======================');
+      
+      // Count how many cases were excluded (total loaded - cases kept)
+      const excludedCount = allRows.length - rows.length;
+      
+      const stageColumns = deriveStageColumns(rows);
+      const filteredRows = applyAllFilters(rows, get().filters, get().settings);
       set({
-        allCaseRows: allRows,
+        allCaseRows: rows,
         stageColumns,
         filteredRows,
         excludedCasesCount: excludedCount,
+        excludedCases,
         loadingProgress: null,
       });
       // Fire-and-forget: don't block the load on persisting the handle.
@@ -345,6 +362,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   closeModal() {
     set({ modalState: null });
+  },
+
+  setExcludedCasesOpen(open) {
+    set({ excludedCasesOpen: open });
   },
 
   // Contract: shallow merge at the TOP LEVEL ONLY. If `update.stages` is

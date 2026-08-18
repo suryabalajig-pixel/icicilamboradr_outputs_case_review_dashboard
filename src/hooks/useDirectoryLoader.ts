@@ -2,7 +2,7 @@ import { listJsonFiles, listSubdirectories, readJsonFile } from '../lib/fsWalk';
 import { getByPath } from '../lib/jsonPath';
 import { countBillTypeMatchingMethods } from '../lib/billTypeMatching';
 import { extractTokenSummary } from '../lib/tokenSummary';
-import type { BillTypeMatchCounts, CaseRow, SettingsConfig, StageResult, TokenSummary } from '../lib/types';
+import type { BillTypeMatchCounts, CaseRow, FailCauseDetail, SettingsConfig, StageResult, TokenSummary } from '../lib/types';
 // Number of case folders processed concurrently per batch. Matches the
 // design doc's performance section: batched (not one giant Promise.all over
 // everything, and not fully serial).
@@ -102,7 +102,7 @@ async function parseStageFile(
   return { fileName, label, score, issueCount, highSeverityCount, raw };
 }
 
-// Derives the human-readable fail cause for a failed case (finalVerdict === 0).
+// Derives the human-readable fail causes for a failed case (finalVerdict === 0).
 // Mirrors the main pipeline's _case_verdict (consolidate.py): the verdict is 0
 // whenever amounts_match is false (or no printed total exists) or overall
 // confidence is below the threshold (pipeline hardcodes 0.9). Knocked-off
@@ -111,17 +111,17 @@ async function parseStageFile(
 // knock-offs were incorrect). NO other signal — adjudication agent statuses,
 // document checker, etc. — affects the verdict, so the fail cause is built
 // ONLY from consolidated_final.json fields plus the consolidation judge.
-// Returns null for non-failed cases.
-function buildFailCause(
+// Returns an empty array for non-failed cases.
+function buildFailCauses(
   finalVerdict: 0 | 1 | null,
   finalRaw: unknown,
   overallConfidence: number | null,
   lowConfidenceThreshold: number,
   stages: StageResult[]
-): string | null {
-  if (finalVerdict !== 0) return null;
+): FailCauseDetail[] {
+  if (finalVerdict !== 0) return [];
 
-  const causes: string[] = [];
+  const causes: FailCauseDetail[] = [];
 
   if (finalRaw !== null && typeof finalRaw === 'object') {
     // 1) amounts_match — reconciled extracted vs calculated within tolerance.
@@ -129,14 +129,19 @@ function buildFailCause(
     //    matched and flags the case.
     const amountsMatchResolved = getByPath(finalRaw, 'bill_summary.amounts_match');
     if (amountsMatchResolved === false) {
-      causes.push('Amount mismatch');
+      causes.push({ label: 'Amount mismatch', stages: [] });
     } else if (amountsMatchResolved === undefined) {
-      causes.push('No printed total');
+      causes.push({ label: 'No printed total', stages: [] });
     }
 
     // 2) overall_confidence < threshold (pipeline: < 0.9)
     if (overallConfidence !== null && overallConfidence < lowConfidenceThreshold) {
-      causes.push('Low confidence');
+      // Identify exactly which stages scored below the threshold so the user
+      // can see where the low confidence came from, not just that it happened.
+      const lowStages = stages
+        .filter((s) => s.score !== null && s.score < lowConfidenceThreshold)
+        .map((s) => s.label);
+      causes.push({ label: 'Low confidence', stages: lowStages });
     }
   }
 
@@ -146,12 +151,12 @@ function buildFailCause(
   //    are benign.
   const consolidationStage = stages.find((stage) => stage.fileName === 'consolidation.json');
   if (consolidationStage !== undefined && hasHighSeverityKnockOffIssue(consolidationStage.raw)) {
-    causes.push('Knocked-off bills');
+    causes.push({ label: 'Knocked-off bills', stages: [] });
   }
 
-  if (causes.length === 0) causes.push('Unknown');
+  if (causes.length === 0) causes.push({ label: 'Unknown', stages: [] });
 
-  return causes.join(', ');
+  return causes;
 }
 
 // True when the consolidation judge's raw blob contains a high-severity issue
@@ -245,12 +250,12 @@ async function parseCaseFolder(
   }
 
   // Calculate mismatch: both amounts must be non-null and differ by more than
-  // the allowed margin of 5. Differences ≤ 5 are treated as matching (rounding
-  // artefacts in OCR / extraction are common at this scale).
+  // the configured tolerance (default ₹5). Differences ≤ tolerance are treated
+  // as matching (rounding artefacts in OCR / extraction are common at this scale).
   const amountMismatch =
     extractedAmount !== null &&
     calculatedAmount !== null &&
-    Math.abs(extractedAmount - calculatedAmount) > 5;
+    Math.abs(extractedAmount - calculatedAmount) > settings.amounts.tolerance;
 
   // --- adjudication.json → financial agent → non_payable_total (knocked)
   //                        → all agents     → judge scores / statuses ----
@@ -343,13 +348,15 @@ async function parseCaseFolder(
     }
   }
 
-  const failCause = buildFailCause(
+  const failCauseDetails = buildFailCauses(
     finalVerdict,
     finalRaw,
     overallConfidence,
     settings.lowConfidenceThreshold,
     stages,
   );
+  const failCause =
+    failCauseDetails.length > 0 ? failCauseDetails.map((c) => c.label).join(', ') : null;
 
   // --- Detect "Not Working" cases ---
   // Cases with calculated_amount = 0, or missing extraction/bill_type_resolution stages
@@ -371,6 +378,7 @@ async function parseCaseFolder(
     nonPayableAmount,
     nonPayableCount,
     failCause,
+    failCauseDetails,
     minJudgeScore,
     avgJudgeScore,
     judgeApprovedAgentCount,
@@ -417,6 +425,7 @@ export async function loadCaseRows(
             nonPayableAmount: null,
             nonPayableCount: null,
             failCause: null,
+            failCauseDetails: [],
             minJudgeScore: null,
             avgJudgeScore: null,
             judgeApprovedAgentCount: null,

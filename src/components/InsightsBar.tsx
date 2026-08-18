@@ -4,13 +4,9 @@ import {
   failCount,
   failedByAmountMismatchCount,
   failedByLowConfidenceCount,
+  failedWithKnockedCount,
   passedWithKnockedCount,
   withKnockedCount,
-  passedWithJudgeApprovalCount,
-  passedWithJudgeFailFlagCount,
-  passedWithLowJudgeScoreCount,
-  passedWithAnyJudgeFlagCount,
-  totalJudgeFlagsInPassedCases,
   errorCount,
   stageInsights,
 } from '../lib/insights';
@@ -112,6 +108,7 @@ export default function InsightsBar() {
   const setFilter        = useAppStore((s) => s.setFilter);
   const clearAllFilters  = useAppStore((s) => s.clearAllFilters);
   const excludedCasesCount = useAppStore((s) => s.excludedCasesCount);
+  const setExcludedCasesOpen = useAppStore((s) => s.setExcludedCasesOpen);
 
   // Always compute metrics against allCaseRows so card values don't collapse
   // to zero when a filter is active (e.g. clicking "Passed" should show 52,
@@ -132,13 +129,7 @@ export default function InsightsBar() {
   // ── Knocked ─────────────────────────────────────────────────────────
   const totalWithKnocked   = withKnockedCount(metricRows);
   const passWithKnocked    = passedWithKnockedCount(metricRows);
-
-  // ── Judge override ──────────────────────────────────────────────────
-  const passAnyFlag   = passedWithAnyJudgeFlagCount(metricRows);
-  const totalFlags    = totalJudgeFlagsInPassedCases(metricRows);
-  const passJudgeFail = passedWithJudgeFailFlagCount(metricRows);
-  const passJudgePass = passedWithJudgeApprovalCount(metricRows);
-  const passLowScore  = passedWithLowJudgeScoreCount(metricRows, 0.75);
+  const failWithKnocked    = failedWithKnockedCount(metricRows);
 
   // ── Stage pipeline ──────────────────────────────────────────────────
   const perStage = stageInsights(metricRows, stageColumns, threshold);
@@ -158,15 +149,15 @@ export default function InsightsBar() {
   const isVerdictFail     = filters.finalVerdict === 0;
   const isAmtMismatch     = filters.amountMismatchOnly === true;
   const isErrorsOnly      = filters.hasErrorsOnly === true;
-  const isNotWorkingOnly  = filters.notWorkingOnly === true;
-  const hasAnyFilter      = isVerdictPass || isVerdictFail || isAmtMismatch || isErrorsOnly || isNotWorkingOnly;
+  const hasAnyFilter      = isVerdictPass || isVerdictFail || isAmtMismatch || isErrorsOnly;
 
   // Toggle helpers — clicking an already-active filter clears all filters.
   const toggleVerdict = (v: 0 | 1) => {
     if (filters.finalVerdict === v) {
       clearAllFilters();
     } else {
-      setFilter({ finalVerdict: v, amountMismatchOnly: false, hasErrorsOnly: false, notWorkingOnly: false });
+      // Reset amountMismatchOnly when switching to a verdict-only filter
+      setFilter({ finalVerdict: v, amountMismatchOnly: false, hasErrorsOnly: false });
     }
   };
 
@@ -174,7 +165,7 @@ export default function InsightsBar() {
     if (isAmtMismatch) {
       clearAllFilters();
     } else {
-      setFilter({ finalVerdict: 0, amountMismatchOnly: true, hasErrorsOnly: false, notWorkingOnly: false });
+      setFilter({ finalVerdict: 0, amountMismatchOnly: true, hasErrorsOnly: false });
     }
   };
 
@@ -182,23 +173,7 @@ export default function InsightsBar() {
     if (isErrorsOnly) {
       clearAllFilters();
     } else {
-      setFilter({ hasErrorsOnly: true, finalVerdict: 'all', amountMismatchOnly: false, notWorkingOnly: false });
-    }
-  };
-
-  const toggleNotWorking = () => {
-    if (isNotWorkingOnly) {
-      // Click again → go back to normal (hide not-working)
-      clearAllFilters();
-    } else {
-      // Show ONLY not-working cases: disable hideNotWorking and enable notWorkingOnly
-      setFilter({
-        notWorkingOnly: true,
-        hideNotWorking: false,
-        finalVerdict: 'all',
-        amountMismatchOnly: false,
-        hasErrorsOnly: false,
-      });
+      setFilter({ hasErrorsOnly: true, finalVerdict: 'all', amountMismatchOnly: false });
     }
   };
 
@@ -253,11 +228,10 @@ export default function InsightsBar() {
             <InsightCard
               label="Not Working"
               value={excludedCasesCount}
-              sub={isNotWorkingOnly ? 'showing only these' : 'click to inspect'}
+              sub="auto-removed from table"
               variant="fail"
-              active={isNotWorkingOnly}
-              onClick={toggleNotWorking}
-              tooltip="Cases with calculated_amount=0, missing extraction or bill_type_resolution.&#10;Click to show ONLY these problem cases in the table.&#10;Click again to return to normal view."
+              onClick={() => setExcludedCasesOpen(true)}
+              tooltip="Cases automatically removed from the dashboard.&#10;Missing amounts, parse errors, or incomplete data.&#10;These cases will not appear in the table or metrics.&#10;Click to view the removed cases."
             />
           )}
           <InsightCard
@@ -332,49 +306,17 @@ export default function InsightsBar() {
             onClick={() => toggleVerdict(1)}
             tooltip="Cases approved despite having non-payable deductions.&#10;Some charges were knocked off but case still passed.&#10;Click to filter and view all passed cases."
           />
+          <InsightCard
+            label="Failed With Knocked"
+            value={failWithKnocked}
+            sub="verdict=0, deductions"
+            variant={failWithKnocked > 0 ? 'fail' : 'muted'}
+            active={isVerdictFail && !isAmtMismatch}
+            onClick={() => toggleVerdict(0)}
+            tooltip="Failed cases with non-payable deductions.&#10;Some charges were knocked off and the case failed.&#10;Click to filter and view all failed cases."
+          />
 
           <Divider />
-
-          {/* ── GROUP 4: Judge Override ───────────────────────────────── */}
-          <GroupLabel label="Judge Override" variant="warn" />
-          <InsightCard
-            label="Passed With Flags"
-            value={passAnyFlag}
-            sub="≥1 override flag"
-            flag={totalFlags > 0 ? `${totalFlags} flags` : undefined}
-            variant={passAnyFlag > 0 ? 'warn' : 'muted'}
-            active={isVerdictPass}
-            onClick={() => toggleVerdict(1)}
-            tooltip="Passed cases with at least one judge flag.&#10;Judge flagged status=fail, status=pass, or score below 0.70.&#10;Click to filter and view all passed cases."
-          />
-          <InsightCard
-            label="Judge Fail Flag"
-            value={passJudgeFail}
-            sub="passed, judge=fail"
-            flag={passJudgeFail > 0 ? 'critical' : undefined}
-            variant={passJudgeFail > 0 ? 'fail' : 'muted'}
-            active={isVerdictPass}
-            onClick={() => toggleVerdict(1)}
-            tooltip="Passed cases where judge marked agent status as 'fail'.&#10;System approved but human reviewer disagreed.&#10;These need attention - click to view passed cases."
-          />
-          <InsightCard
-            label="Judge Approved"
-            value={passJudgePass}
-            sub="judge.status=pass"
-            variant={passJudgePass > 0 ? 'pass' : 'muted'}
-            active={isVerdictPass}
-            onClick={() => toggleVerdict(1)}
-            tooltip="Cases where judge explicitly set status='pass'.&#10;Human reviewer fully approved the agent output.&#10;Click to filter and view all passed cases."
-          />
-          <InsightCard
-            label="Low Judge Score"
-            value={passLowScore}
-            sub="min score < 75%"
-            variant={passLowScore > 0 ? 'warn' : 'muted'}
-            active={isVerdictPass}
-            onClick={() => toggleVerdict(1)}
-            tooltip="Passed cases where lowest judge score is below 75%.&#10;At least one agent had low judge confidence.&#10;Click to filter and view all passed cases."
-          />
 
           {/* ── GROUP 5: Pipeline Stages ──────────────────────────────── */}
           {perStage.length > 0 && (
