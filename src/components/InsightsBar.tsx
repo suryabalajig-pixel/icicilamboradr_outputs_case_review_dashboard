@@ -4,9 +4,7 @@ import {
   failCount,
   failedByAmountMismatchCount,
   failedByLowConfidenceCount,
-  failedByAgentBlockCount,
   failedWithKnockedCount,
-  failedWithoutKnockedCount,
   passedWithKnockedCount,
   withKnockedCount,
   passedWithJudgeApprovalCount,
@@ -28,9 +26,10 @@ interface InsightCardProps {
   active?: boolean;         // true = card is the currently active filter
   onClick?: () => void;
   variant?: 'default' | 'pass' | 'fail' | 'warn' | 'muted';
+  tooltip?: string;         // hover tooltip definition (max 3 lines)
 }
 
-function InsightCard({ label, value, sub, flag, active, onClick, variant = 'default' }: InsightCardProps) {
+function InsightCard({ label, value, sub, flag, active, onClick, variant = 'default', tooltip }: InsightCardProps) {
   const valueColor: Record<string, string> = {
     default: 'text-textPrimary',
     pass:    'text-green-600',
@@ -39,10 +38,14 @@ function InsightCard({ label, value, sub, flag, active, onClick, variant = 'defa
     muted:   'text-textMuted',
   };
 
+  const titleText = active 
+    ? 'Click to clear this filter' 
+    : tooltip || undefined;
+
   return (
     <div
       onClick={onClick}
-      title={active ? 'Click to clear this filter' : undefined}
+      title={titleText}
       className={[
         'flex min-w-[140px] flex-col gap-1 rounded-lg border bg-card px-3 py-2.5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md',
         onClick ? 'cursor-pointer' : '',
@@ -131,13 +134,11 @@ export default function InsightsBar() {
   // ── Fail-reason breakdown ───────────────────────────────────────────
   const failAmtMismatch = failedByAmountMismatchCount(metricRows);
   const failLowConf     = failedByLowConfidenceCount(metricRows, threshold);
-  const failAgentBlock  = failedByAgentBlockCount(metricRows, threshold);
 
   // ── Knocked ─────────────────────────────────────────────────────────
   const totalWithKnocked   = withKnockedCount(metricRows);
   const passWithKnocked    = passedWithKnockedCount(metricRows);
   const failWithKnocked    = failedWithKnockedCount(metricRows);
-  const failWithoutKnocked = failedWithoutKnockedCount(metricRows);
 
   // ── Judge override ──────────────────────────────────────────────────
   const passAnyFlag   = passedWithAnyJudgeFlagCount(metricRows);
@@ -233,7 +234,12 @@ export default function InsightsBar() {
 
           {/* ── GROUP 1: Summary ──────────────────────────────────────── */}
           <GroupLabel label="Summary" />
-          <InsightCard label="Total Cases" value={total} variant="muted" />
+          <InsightCard 
+            label="Total Cases" 
+            value={total} 
+            variant="muted"
+            tooltip="Total number of cases loaded from the selected folder. Includes both passed and failed cases."
+          />
           <InsightCard
             label="Passed"
             value={passed}
@@ -241,6 +247,7 @@ export default function InsightsBar() {
             variant={passed > 0 ? 'pass' : 'muted'}
             active={isVerdictPass}
             onClick={() => toggleVerdict(1)}
+            tooltip="Cases where finalVerdict = 1 (approved). Click to filter and see only passed cases."
           />
           <InsightCard
             label="Failed"
@@ -249,6 +256,7 @@ export default function InsightsBar() {
             variant={failed > 0 ? 'fail' : 'muted'}
             active={isVerdictFail && !isAmtMismatch}
             onClick={() => toggleVerdict(0)}
+            tooltip="Cases where finalVerdict = 0 (rejected). Click to filter and see only failed cases."
           />
           {errors > 0 && (
             <InsightCard
@@ -258,6 +266,7 @@ export default function InsightsBar() {
               variant="fail"
               active={isErrorsOnly}
               onClick={toggleErrors}
+              tooltip="Cases with missing or unparsable JSON files. Check errorDetails in table for specifics."
             />
           )}
 
@@ -272,6 +281,7 @@ export default function InsightsBar() {
             variant={failAmtMismatch > 0 ? 'warn' : 'muted'}
             active={isAmtMismatch}
             onClick={toggleAmtMismatch}
+            tooltip="Failed cases where extracted amount differs from calculated amount by more than ₹5. Indicates extraction errors."
           />
           <InsightCard
             label={`Low Conf <${(threshold * 100).toFixed(0)}%`}
@@ -280,13 +290,7 @@ export default function InsightsBar() {
             variant={failLowConf > 0 ? 'fail' : 'muted'}
             active={isVerdictFail && !isAmtMismatch && !isErrorsOnly}
             onClick={() => toggleVerdict(0)}
-          />
-          <InsightCard
-            label="Agent Blocked"
-            value={failAgentBlock}
-            sub="doc / admin / financial"
-            variant={failAgentBlock > 0 ? 'warn' : 'muted'}
-            onClick={() => toggleVerdict(0)}
+            tooltip={`Failed cases where amounts match but overall confidence is below ${(threshold * 100).toFixed(0)}%. Model uncertain about result.`}
           />
 
           <Divider />
@@ -297,6 +301,7 @@ export default function InsightsBar() {
             label="Total With Knocked"
             value={totalWithKnocked}
             variant={totalWithKnocked > 0 ? 'warn' : 'muted'}
+            tooltip="Total cases (passed + failed) with non-payable deductions. Amount knocked/disallowed by financial agent."
           />
           <InsightCard
             label="Passed With Knocked"
@@ -305,6 +310,7 @@ export default function InsightsBar() {
             variant={passWithKnocked > 0 ? 'pass' : 'muted'}
             active={isVerdictPass}
             onClick={() => toggleVerdict(1)}
+            tooltip="Passed cases that had some charges disallowed. Case approved despite deductions being applied."
           />
           <InsightCard
             label="Failed With Knocked"
@@ -313,13 +319,7 @@ export default function InsightsBar() {
             variant={failWithKnocked > 0 ? 'fail' : 'muted'}
             active={isVerdictFail && !isAmtMismatch}
             onClick={() => toggleVerdict(0)}
-          />
-          <InsightCard
-            label="Failed No Knocked"
-            value={failWithoutKnocked}
-            sub="verdict=0, no deductions"
-            variant={failWithoutKnocked > 0 ? 'warn' : 'muted'}
-            onClick={() => toggleVerdict(0)}
+            tooltip="Failed cases with non-payable deductions. Case rejected and had charges knocked/disallowed."
           />
 
           <Divider />
@@ -334,6 +334,7 @@ export default function InsightsBar() {
             variant={passAnyFlag > 0 ? 'warn' : 'muted'}
             active={isVerdictPass}
             onClick={() => toggleVerdict(1)}
+            tooltip="Passed cases with judge override flags. Flags: judge.status=pass/fail or judge.score<0.70. Needs review."
           />
           <InsightCard
             label="Judge Fail Flag"
@@ -343,6 +344,7 @@ export default function InsightsBar() {
             variant={passJudgeFail > 0 ? 'fail' : 'muted'}
             active={isVerdictPass}
             onClick={() => toggleVerdict(1)}
+            tooltip="Passed cases where judge explicitly failed an agent (judge.status=fail). Critical contradiction - needs investigation."
           />
           <InsightCard
             label="Judge Approved"
@@ -351,6 +353,7 @@ export default function InsightsBar() {
             variant={passJudgePass > 0 ? 'pass' : 'muted'}
             active={isVerdictPass}
             onClick={() => toggleVerdict(1)}
+            tooltip="Cases with explicit judge approval (judge.status=pass). Rare - indicates manual override or special handling."
           />
           <InsightCard
             label="Low Judge Score"
@@ -359,6 +362,7 @@ export default function InsightsBar() {
             variant={passLowScore > 0 ? 'warn' : 'muted'}
             active={isVerdictPass}
             onClick={() => toggleVerdict(1)}
+            tooltip="Passed cases where minimum judge score across agents is below 75%. Judge had low confidence despite approval."
           />
 
           {/* ── GROUP 5: Pipeline Stages ──────────────────────────────── */}
@@ -373,6 +377,7 @@ export default function InsightsBar() {
                   value={s.avg === null ? '—' : s.avg.toFixed(2)}
                   sub={s.lowCount > 0 ? `${s.lowCount} low` : 'all good'}
                   variant={s.lowCount > 0 ? 'warn' : 'muted'}
+                  tooltip={`Average confidence score for ${stageLabel(s.fileName)} stage. Low count shows cases below ${(threshold * 100).toFixed(0)}% threshold.`}
                 />
               ))}
             </>
