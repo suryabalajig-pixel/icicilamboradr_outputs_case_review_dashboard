@@ -67,7 +67,14 @@ export default function SettingsPanel() {
     try {
       const text = await file.text();
       const parsed = JSON.parse(text);
-      const merged: SettingsConfig = { ...DEFAULT_SETTINGS, ...parsed };
+      const merged: SettingsConfig = {
+        ...DEFAULT_SETTINGS,
+        ...parsed,
+        finalVerdict: { ...DEFAULT_SETTINGS.finalVerdict, ...parsed.finalVerdict },
+        overallConfidence: { ...DEFAULT_SETTINGS.overallConfidence, ...parsed.overallConfidence },
+        amounts: { ...DEFAULT_SETTINGS.amounts, ...parsed.amounts },
+        stageDefaults: { ...DEFAULT_SETTINGS.stageDefaults, ...parsed.stageDefaults },
+      };
       setDraft(merged);
       updateSettings(merged);
       rederiveCaseRows();

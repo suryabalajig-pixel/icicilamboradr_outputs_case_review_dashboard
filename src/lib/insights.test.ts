@@ -23,6 +23,7 @@ function makeRow(overrides: Partial<CaseRow>): CaseRow {
     nonPayableAmount: null,
     nonPayableCount: null,
     failCause: null,
+    failCauseDetails: [],
     minJudgeScore: null,
     avgJudgeScore: null,
     judgeApprovedAgentCount: null,

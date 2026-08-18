@@ -6,6 +6,7 @@ import type {
   AppStore,
   BillTypeMatchCounts,
   CaseRow,
+  ExcludedCase,
   FilterState,
   SettingsConfig,
   StageResult,
@@ -185,11 +186,13 @@ function rederiveRow(row: CaseRow, settings: SettingsConfig): CaseRow {
     }
   }
 
-  // Calculate mismatch: differ by more than 5 (same margin as the loader).
+  // Calculate mismatch: differ by more than the configured tolerance
+  // (default ₹5). Differences ≤ tolerance are treated as matching (rounding
+  // artefacts in OCR / extraction are common at this scale).
   const amountMismatch =
     extractedAmount !== null &&
     calculatedAmount !== null &&
-    Math.abs(extractedAmount - calculatedAmount) > 5;
+    Math.abs(extractedAmount - calculatedAmount) > settings.amounts.tolerance;
 
   const stages: StageResult[] = row.stages.map((stage) => {
     const override = settings.stageOverrides[stage.fileName];
@@ -244,6 +247,7 @@ function rederiveRow(row: CaseRow, settings: SettingsConfig): CaseRow {
     nonPayableCount: row.nonPayableCount,
     // failCause is also derived from adjudication.json — preserve as-loaded.
     failCause: row.failCause,
+    failCauseDetails: row.failCauseDetails,
     // Judge fields also come from adjudication.json — preserve as-loaded.
     minJudgeScore: row.minJudgeScore,
     avgJudgeScore: row.avgJudgeScore,
@@ -263,6 +267,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   stageColumns: [],
   loadingProgress: null,
   excludedCasesCount: 0,
+  excludedCases: [],
+  excludedCasesOpen: false,
 
   settings: DEFAULT_SETTINGS,
 
@@ -288,7 +294,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       console.log('=== FILTERING DEBUG ===');
       console.log('Total loaded cases:', allRows.length);
       
-      const excludedCases: Array<{caseId: string, reasons: string[]}> = [];
+      const excludedCases: ExcludedCase[] = [];
       
       // Filter to keep only valid cases where:
       // 1. Both amounts are present (not null) - these show as "—" in the table
@@ -308,8 +314,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
                        row.hasErrors === false;
         
         if (!isValid) {
-          excludedCases.push({ caseId: row.caseId, reasons });
-          console.log(`EXCLUDED: ${row.caseId}`, reasons);
+          excludedCases.push({ caseId: row.caseId, reasons, row });
         }
         
         return isValid;
@@ -330,6 +335,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         stageColumns,
         filteredRows,
         excludedCasesCount: excludedCount,
+        excludedCases,
         loadingProgress: null,
       });
       // Fire-and-forget: don't block the load on persisting the handle.
@@ -356,6 +362,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   closeModal() {
     set({ modalState: null });
+  },
+
+  setExcludedCasesOpen(open) {
+    set({ excludedCasesOpen: open });
   },
 
   // Contract: shallow merge at the TOP LEVEL ONLY. If `update.stages` is
