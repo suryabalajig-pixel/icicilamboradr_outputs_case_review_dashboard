@@ -402,6 +402,25 @@ export default function CaseTable() {
     return fileName;
   };
 
+  // Average token usage across the visible rows.
+  const avgTokens = useMemo(() => {
+    const rowsWithIn = filteredRows.filter((r) => r.tokenSummary.totalTokensIn !== null);
+    const rowsWithOut = filteredRows.filter((r) => r.tokenSummary.totalTokensOut !== null);
+    const rowsWithTotal = filteredRows.filter((r) => r.tokenSummary.overallTotalTokens !== null);
+
+    const avg = (rows: CaseRow[], pick: (r: CaseRow) => number | null): number | null => {
+      if (rows.length === 0) return null;
+      const sum = rows.reduce((acc, r) => acc + (pick(r) ?? 0), 0);
+      return sum / rows.length;
+    };
+
+    return {
+      in: avg(rowsWithIn, (r) => r.tokenSummary.totalTokensIn),
+      out: avg(rowsWithOut, (r) => r.tokenSummary.totalTokensOut),
+      total: avg(rowsWithTotal, (r) => r.tokenSummary.overallTotalTokens),
+    };
+  }, [filteredRows]);
+
   const columns = useMemo(() => {
     const cols = [
       // ── S.No — pinned, display-only, shows visual row position ───────
@@ -562,7 +581,16 @@ export default function CaseTable() {
       columnHelper.accessor('tokenSummary', {
         id: 'tokenSummary',
         size: 170,
-        header: () => <span>Token Count</span>,
+        header: () => (
+          <div className="flex flex-col gap-1">
+            <span>Token Count</span>
+            <div className="flex flex-col font-mono text-[11px] font-normal leading-tight text-textMuted">
+              <span>avg in: {avgTokens.in === null ? '—' : avgTokens.in.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+              <span>avg out: {avgTokens.out === null ? '—' : avgTokens.out.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+              <span>avg total: {avgTokens.total === null ? '—' : avgTokens.total.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+            </div>
+          </div>
+        ),
         cell: (info) => <TokenSummaryCell summary={info.getValue()} />,
         sortingFn: (a, b) => {
           const aTotal = a.original.tokenSummary.overallTotalTokens ?? 0;
@@ -600,7 +628,7 @@ export default function CaseTable() {
     ];
     return cols;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stageColumns, allCaseRows, settings.finalVerdict.file]);
+  }, [stageColumns, allCaseRows, settings.finalVerdict.file, avgTokens]);
 
   const table = useReactTable({
     data: filteredRows,
