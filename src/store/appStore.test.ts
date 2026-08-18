@@ -35,6 +35,7 @@ function makeRow(overrides: Partial<CaseRow> = {}): CaseRow {
     stages: [],
     hasErrors: false,
     errorDetails: [],
+    isNotWorking: false,
     ...overrides,
   };
 }
@@ -139,11 +140,12 @@ function resetStore() {
     allCaseRows: [],
     stageColumns: [],
     loadingProgress: null,
+    excludedCasesCount: 0,
     settings: DEFAULT_SETTINGS,
     sidebarOpen: false,
     settingsPanelOpen: false,
     modalState: null,
-    filters: { caseIdText: '', finalVerdict: 'all', stages: {}, hasErrorsOnly: false, amountMismatchOnly: false, amountMatchFilter: 'all' },
+    filters: { caseIdText: '', finalVerdict: 'all', stages: {}, hasErrorsOnly: false, amountMismatchOnly: false, amountMatchFilter: 'all', hideNotWorking: true, notWorkingOnly: false },
     filteredRows: [],
     insightsScope: 'filtered',
   });
@@ -177,6 +179,7 @@ describe('rederiveCaseRows', () => {
         ],
         hasErrors: true,
         errorDetails: ['stale'],
+        isNotWorking: false,
       },
     ];
 
@@ -217,6 +220,7 @@ describe('rederiveCaseRows', () => {
         ],
         hasErrors: false,
         errorDetails: [],
+        isNotWorking: false,
       },
     ];
 
@@ -262,6 +266,7 @@ describe('rederiveCaseRows', () => {
         ],
         hasErrors: false,
         errorDetails: [],
+        isNotWorking: false,
       },
     ];
 
@@ -325,6 +330,8 @@ describe('setFilter / clearFilter / clearAllFilters', () => {
       hasErrorsOnly: false,
       amountMismatchOnly: false,
       amountMatchFilter: 'all',
+      hideNotWorking: true,
+      notWorkingOnly: false,
     });
   });
 });
@@ -349,6 +356,8 @@ describe('updateSettings', () => {
         hasErrorsOnly: false,
         amountMismatchOnly: false,
         amountMatchFilter: 'all',
+        hideNotWorking: true,
+        notWorkingOnly: false,
       },
     });
 

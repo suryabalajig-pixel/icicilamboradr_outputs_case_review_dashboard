@@ -49,6 +49,12 @@ export function matchesAmountMatchFilter(
   return true;
 }
 
+export function matchesNotWorkingFilter(row: CaseRow, hideNotWorking: boolean, notWorkingOnly: boolean): boolean {
+  if (notWorkingOnly) return row.isNotWorking === true;   // show ONLY not-working cases
+  if (hideNotWorking) return row.isNotWorking === false;  // hide not-working cases
+  return true;                                            // show all
+}
+
 export function matchesStageFilter(
   row: CaseRow,
   fileName: string,
@@ -89,6 +95,7 @@ export function applyAllFilters(
       matchesHasErrorsFilter(row, filters.hasErrorsOnly) &&
       matchesAmountMismatchFilter(row, filters.amountMismatchOnly) &&
       matchesAmountMatchFilter(row, filters.amountMatchFilter) &&
+      matchesNotWorkingFilter(row, filters.hideNotWorking, filters.notWorkingOnly) &&
       Object.entries(filters.stages).every(([fileName, stageFilter]) =>
         matchesStageFilter(row, fileName, stageFilter, settings.lowConfidenceThreshold)
       )
@@ -113,6 +120,8 @@ const DEFAULT_FILTERS: FilterState = {
   hasErrorsOnly: false,
   amountMismatchOnly: false,
   amountMatchFilter: 'all',
+  hideNotWorking: true,   // hide not-working by default
+  notWorkingOnly: false,  // not in "show only not-working" mode
 };
 
 // Resolves a value at `path` on `raw`, coercing it to a number or null.
@@ -230,6 +239,15 @@ function rederiveRow(row: CaseRow, settings: SettingsConfig): CaseRow {
 
   const hasErrors = errorDetails.length > 0;
 
+  // Re-detect "Not Working" status
+  const extractionStage = stages.find((s) => s.fileName === 'extraction.json');
+  const billTypeStage = stages.find((s) => s.fileName === 'bill_type_resolution.json');
+  
+  const isNotWorking = 
+    calculatedAmount === 0 ||
+    extractionStage === undefined ||
+    billTypeStage === undefined;
+
   return {
     ...row,
     finalVerdict,
@@ -255,6 +273,7 @@ function rederiveRow(row: CaseRow, settings: SettingsConfig): CaseRow {
     stages,
     hasErrors,
     errorDetails,
+    isNotWorking,
   };
 }
 
@@ -284,49 +303,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
         set({ loadingProgress: { done, total } });
       });
       
-      // Debug: Check what's being filtered out
-      console.log('=== FILTERING DEBUG ===');
-      console.log('Total loaded cases:', allRows.length);
+      // Count "not working" cases (auto-excluded from table)
+      const notWorkingCases = allRows.filter(row => row.isNotWorking);
+      const excludedCount = notWorkingCases.length;
       
-      const excludedCases: Array<{caseId: string, reasons: string[]}> = [];
+      console.log('=== CASE LOADING SUMMARY ===');
+      console.log('Total loaded:', allRows.length);
+      console.log('Not working (auto-excluded):', excludedCount);
+      console.log('Valid cases for table:', allRows.length - excludedCount);
       
-      // Filter to keep only valid cases where:
-      // 1. Both amounts are present (not null) - these show as "—" in the table
-      // 2. Final verdict is present (not null) - critical for analysis
-      // 3. No errors (hasErrors === false) - includes missing data, parse errors
-      const rows = allRows.filter(row => {
-        const reasons: string[] = [];
-        
-        if (row.extractedAmount === null) reasons.push('extractedAmount is null');
-        if (row.calculatedAmount === null) reasons.push('calculatedAmount is null');
-        if (row.finalVerdict === null) reasons.push('finalVerdict is null');
-        if (row.hasErrors === true) reasons.push('hasErrors is true');
-        
-        const isValid = row.extractedAmount !== null && 
-                       row.calculatedAmount !== null &&
-                       row.finalVerdict !== null &&
-                       row.hasErrors === false;
-        
-        if (!isValid) {
-          excludedCases.push({ caseId: row.caseId, reasons });
-          console.log(`EXCLUDED: ${row.caseId}`, reasons);
-        }
-        
-        return isValid;
-      });
-      
-      console.log('Valid cases kept:', rows.length);
-      console.log('Cases excluded:', excludedCases.length);
-      console.log('Excluded cases details:', excludedCases);
-      console.log('======================');
-      
-      // Count how many cases were excluded (total loaded - cases kept)
-      const excludedCount = allRows.length - rows.length;
-      
-      const stageColumns = deriveStageColumns(rows);
-      const filteredRows = applyAllFilters(rows, get().filters, get().settings);
+      const stageColumns = deriveStageColumns(allRows);
+      const filteredRows = applyAllFilters(allRows, get().filters, get().settings);
       set({
-        allCaseRows: rows,
+        allCaseRows: allRows,
         stageColumns,
         filteredRows,
         excludedCasesCount: excludedCount,

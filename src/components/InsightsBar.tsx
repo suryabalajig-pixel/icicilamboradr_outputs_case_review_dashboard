@@ -4,7 +4,6 @@ import {
   failCount,
   failedByAmountMismatchCount,
   failedByLowConfidenceCount,
-  failedWithKnockedCount,
   passedWithKnockedCount,
   withKnockedCount,
   passedWithJudgeApprovalCount,
@@ -133,7 +132,6 @@ export default function InsightsBar() {
   // ── Knocked ─────────────────────────────────────────────────────────
   const totalWithKnocked   = withKnockedCount(metricRows);
   const passWithKnocked    = passedWithKnockedCount(metricRows);
-  const failWithKnocked    = failedWithKnockedCount(metricRows);
 
   // ── Judge override ──────────────────────────────────────────────────
   const passAnyFlag   = passedWithAnyJudgeFlagCount(metricRows);
@@ -160,15 +158,15 @@ export default function InsightsBar() {
   const isVerdictFail     = filters.finalVerdict === 0;
   const isAmtMismatch     = filters.amountMismatchOnly === true;
   const isErrorsOnly      = filters.hasErrorsOnly === true;
-  const hasAnyFilter      = isVerdictPass || isVerdictFail || isAmtMismatch || isErrorsOnly;
+  const isNotWorkingOnly  = filters.notWorkingOnly === true;
+  const hasAnyFilter      = isVerdictPass || isVerdictFail || isAmtMismatch || isErrorsOnly || isNotWorkingOnly;
 
   // Toggle helpers — clicking an already-active filter clears all filters.
   const toggleVerdict = (v: 0 | 1) => {
     if (filters.finalVerdict === v) {
       clearAllFilters();
     } else {
-      // Reset amountMismatchOnly when switching to a verdict-only filter
-      setFilter({ finalVerdict: v, amountMismatchOnly: false, hasErrorsOnly: false });
+      setFilter({ finalVerdict: v, amountMismatchOnly: false, hasErrorsOnly: false, notWorkingOnly: false });
     }
   };
 
@@ -176,7 +174,7 @@ export default function InsightsBar() {
     if (isAmtMismatch) {
       clearAllFilters();
     } else {
-      setFilter({ finalVerdict: 0, amountMismatchOnly: true, hasErrorsOnly: false });
+      setFilter({ finalVerdict: 0, amountMismatchOnly: true, hasErrorsOnly: false, notWorkingOnly: false });
     }
   };
 
@@ -184,7 +182,23 @@ export default function InsightsBar() {
     if (isErrorsOnly) {
       clearAllFilters();
     } else {
-      setFilter({ hasErrorsOnly: true, finalVerdict: 'all', amountMismatchOnly: false });
+      setFilter({ hasErrorsOnly: true, finalVerdict: 'all', amountMismatchOnly: false, notWorkingOnly: false });
+    }
+  };
+
+  const toggleNotWorking = () => {
+    if (isNotWorkingOnly) {
+      // Click again → go back to normal (hide not-working)
+      clearAllFilters();
+    } else {
+      // Show ONLY not-working cases: disable hideNotWorking and enable notWorkingOnly
+      setFilter({
+        notWorkingOnly: true,
+        hideNotWorking: false,
+        finalVerdict: 'all',
+        amountMismatchOnly: false,
+        hasErrorsOnly: false,
+      });
     }
   };
 
@@ -239,9 +253,11 @@ export default function InsightsBar() {
             <InsightCard
               label="Not Working"
               value={excludedCasesCount}
-              sub="auto-removed from table"
+              sub={isNotWorkingOnly ? 'showing only these' : 'click to inspect'}
               variant="fail"
-              tooltip="Cases automatically removed from the dashboard.&#10;Missing amounts, parse errors, or incomplete data.&#10;These cases will not appear in the table or metrics."
+              active={isNotWorkingOnly}
+              onClick={toggleNotWorking}
+              tooltip="Cases with calculated_amount=0, missing extraction or bill_type_resolution.&#10;Click to show ONLY these problem cases in the table.&#10;Click again to return to normal view."
             />
           )}
           <InsightCard

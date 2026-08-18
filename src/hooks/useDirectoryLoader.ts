@@ -351,6 +351,16 @@ async function parseCaseFolder(
     stages,
   );
 
+  // --- Detect "Not Working" cases ---
+  // Cases with calculated_amount = 0, or missing extraction/bill_type_resolution stages
+  const extractionStage = stages.find((s) => s.fileName === 'extraction.json');
+  const billTypeStage = stages.find((s) => s.fileName === 'bill_type_resolution.json');
+  
+  const isNotWorking = 
+    calculatedAmount === 0 ||
+    extractionStage === undefined ||
+    billTypeStage === undefined;
+
   return {
     caseId,
     finalVerdict,
@@ -372,6 +382,7 @@ async function parseCaseFolder(
     stages,
     hasErrors: errorDetails.length > 0,
     errorDetails,
+    isNotWorking,
   };
 }
 
@@ -417,6 +428,7 @@ export async function loadCaseRows(
             stages: [],
             hasErrors: true,
             errorDetails: [`Unexpected error while parsing case folder: ${String(err)}`],
+            isNotWorking: true,  // Error cases are considered not working
           } satisfies CaseRow;
         }
       })

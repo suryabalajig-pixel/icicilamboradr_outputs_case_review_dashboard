@@ -99,6 +99,10 @@ export function errorCount(rows: CaseRow[]): number {
   return rows.filter((row) => row.hasErrors).length;
 }
 
+export function notWorkingCount(rows: CaseRow[]): number {
+  return rows.filter((row) => row.isNotWorking).length;
+}
+
 export function amountMismatchCount(rows: CaseRow[]): number {
   return rows.filter((row) => row.amountMismatch).length;
 }

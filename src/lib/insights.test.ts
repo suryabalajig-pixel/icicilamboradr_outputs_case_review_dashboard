@@ -34,6 +34,7 @@ function makeRow(overrides: Partial<CaseRow>): CaseRow {
     stages: [],
     hasErrors: false,
     errorDetails: [],
+    isNotWorking: false,
     ...overrides,
   };
 }

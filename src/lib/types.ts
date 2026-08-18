@@ -85,6 +85,7 @@ export interface CaseRow {
   stages: StageResult[];       // one entry per non-excluded stage file
   hasErrors: boolean;          // true if any file is missing, unparsable, or key absent
   errorDetails: string[];      // human-readable error descriptions per field
+  isNotWorking: boolean;       // true if calculated_amount=0 or extraction/bill_type_resolution missing
 }
 
 // Active filter state (one entry per column)
@@ -99,6 +100,8 @@ export interface FilterState {
     lowConfOnly: boolean;
   }>;
   hasErrorsOnly: boolean;
+  hideNotWorking: boolean;      // if true, hide cases with isNotWorking=true
+  notWorkingOnly: boolean;      // if true, show ONLY cases with isNotWorking=true
 }
 
 // Global Zustand store shape (implemented in Task 3 — define the interface here so
